@@ -3,7 +3,7 @@ export interface AdapterDetection { installed: boolean; version?: string; reason
 export interface AdapterAuthentication { authenticated: boolean; reason?: string }
 export interface AgentExecutionRequest { taskId: string; title: string; instructions: string; workingDirectory: string; context: string[] }
 export type AgentExecutionEvent = { type: "STARTED" | "PROGRESS" | "LOG" | "COMPLETED" | "FAILED" | "CANCELLED"; message: string; at: string };
-export interface AgentExecutionResult { taskId: string; status: "COMPLETED" | "FAILED" | "CANCELLED"; summary: string; files: string[]; startedAt: string; completedAt: string }
+export interface AgentExecutionResult { taskId: string; status: "COMPLETED" | "FAILED" | "CANCELLED"; summary: string; files: string[]; branch?: string; startedAt: string; completedAt: string }
 
 export interface AgentAdapter {
   readonly id: string;

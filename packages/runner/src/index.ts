@@ -59,6 +59,7 @@ export class AgentTaskExecutor {
       await this.adapter.executeTask(request);
       for await (const event of this.adapter.streamEvents(task.id)) await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, event });
       const result = await this.adapter.getResult(task.id);
+      if (result) await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, delivery: { status: result.status, summary: result.summary, files: result.files, branch: result.branch } });
       if (result?.status === "COMPLETED") await this.runner.updateTask(task.id, "REVIEW", result.summary);
       else await this.runner.updateTask(task.id, "FAILED", result?.summary ?? "O agente não retornou uma entrega");
     } catch (error: unknown) { await this.runner.updateTask(task.id, "FAILED", error instanceof Error ? error.message : String(error)); throw error; }

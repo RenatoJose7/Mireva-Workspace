@@ -4,13 +4,12 @@ Ambiente colaborativo para coordenar agentes de IA que trabalham em clones indep
 
 ## Estado atual
 
-- Hub local HTTP com persistência JSON e recuperação após reinício.
-- Salas privadas com código de convite e até cinco Runners mais o proprietário.
-- Eventos ordenados por sala, presença e tarefa inicial com dependências.
-- Runner independente que publica e busca eventos de forma resiliente.
-- CLI funcional: `init`, `login`, `create`, `join`, `start`, `status`, `agents`, `doctor` e `leave`.
-
-Cloudflare Durable Objects, autenticação remota, WebSockets, adaptadores reais de IA, Office web e Git worktrees pertencem às próximas fases. O adaptador `mock` existe apenas para desenvolvimento e testes.
+- Hub remoto no Cloudflare com Durable Objects, salas por código e eventos ordenados.
+- Presença com recuperação: runners inativos aparecem como desconectados e tarefas em execução ficam bloqueadas para revisão humana.
+- Tarefas com dependências, prioridade, tentativa, resultado e ciclo `READY → CLAIMED → RUNNING → REVIEW → DONE`.
+- Runner automático: busca, reivindica e executa a próxima tarefa compatível.
+- Adaptadores `mock` e `codex`. O adaptador Codex chama o CLI instalado no computador, encaminha os eventos para a sala e mantém o runner ativo durante a execução.
+- Office web inicial que mostra participantes, tarefas e eventos reais da sala.
 
 ## Hub público com Cloudflare
 
@@ -32,6 +31,34 @@ corepack enable
 pnpm install --frozen-lockfile
 pnpm test
 ```
+
+Para publicar o Hub no Cloudflare, o pnpm pode pedir aprovação do build do `workerd`. Quando aparecer esse aviso, execute `pnpm approve-builds`, selecione `workerd`, e depois rode `pnpm hub:deploy` novamente.
+
+## Executar uma tarefa com o Codex
+
+Em um computador que tenha o Codex CLI autenticado, atualize o projeto e confirme a instalação:
+
+```powershell
+git pull
+pnpm install
+codex login
+pnpm cli doctor -- --hub https://mireva-hub.renatojosesfc.workers.dev --adapter codex
+```
+
+Entre na sala usando `codex` como agente (ou reutilize um estado de runner já conectado):
+
+```powershell
+pnpm cli join 2B7E325E -- --hub https://mireva-hub.renatojosesfc.workers.dev --name "Codex do Renato" --agent codex --state .mireva\runner-codex.json
+```
+
+O proprietário cria uma tarefa. Depois, no runner com o Codex, execute uma vez para testar ou deixe o processo acompanhando a fila:
+
+```powershell
+pnpm cli work -- --state .mireva\runner-codex.json --adapter codex --once
+pnpm cli work -- --state .mireva\runner-codex.json --adapter codex
+```
+
+O Codex trabalha no diretório em que o comando foi iniciado. Ele não recebe permissões globais nem comandos para ignorar proteções: qualquer aprovação continua sob controle do usuário. Ao concluir, a tarefa vai para `REVIEW`; a decisão de marcar `DONE` permanece humana por enquanto.
 
 ## Demonstração com dois Runners
 

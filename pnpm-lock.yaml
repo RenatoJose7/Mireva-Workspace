@@ -83,6 +83,8 @@ importers:
         specifier: ^7.0.0
         version: 7.3.7(@types/node@24.19.2)(tsx@4.23.15)
 
+  packages/agent-adapters: {}
+
   packages/cli:
     dependencies:
       '@mireva/runner':
@@ -97,6 +99,9 @@ importers:
 
   packages/runner:
     dependencies:
+      '@mireva/agent-adapters':
+        specifier: workspace:*
+        version: link:../agent-adapters
       '@mireva/protocol':
         specifier: workspace:*
         version: link:../protocol

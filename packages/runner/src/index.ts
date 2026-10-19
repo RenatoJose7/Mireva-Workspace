@@ -1,3 +1,4 @@
+import type { AgentAdapter, AgentExecutionRequest } from "@mireva/agent-adapters";
 import type { AgentState, Participant, RoomEvent, Task } from "@mireva/protocol";
 
 export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; lastSequence: number }
@@ -45,4 +46,21 @@ export async function joinRunner(hubUrl: string, roomCode: string, name: string,
   if (!response.ok) throw new Error(`Could not join room: ${await response.text()}`);
   const participant = await response.json() as Participant;
   return { hubUrl, roomCode, participantId: participant.id, name, agent, lastSequence: 0 };
+}
+
+export class AgentTaskExecutor {
+  constructor(private readonly runner: MirevaRunner, private readonly adapter: AgentAdapter) {}
+  async execute(task: Task, workingDirectory: string, context: string[] = []): Promise<void> {
+    const request: AgentExecutionRequest = { taskId: task.id, title: task.title, instructions: task.description, workingDirectory, context };
+    await this.runner.setPresence("WORKING");
+    await this.runner.updateTask(task.id, "RUNNING");
+    try {
+      await this.adapter.executeTask(request);
+      for await (const event of this.adapter.streamEvents(task.id)) await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, event });
+      const result = await this.adapter.getResult(task.id);
+      if (result?.status === "COMPLETED") await this.runner.updateTask(task.id, "REVIEW", result.summary);
+      else await this.runner.updateTask(task.id, "FAILED", result?.summary ?? "O agente não retornou uma entrega");
+    } catch (error: unknown) { await this.runner.updateTask(task.id, "FAILED", error instanceof Error ? error.message : String(error)); throw error; }
+    finally { await this.runner.setPresence("AVAILABLE"); }
+  }
 }

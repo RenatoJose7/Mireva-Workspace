@@ -19,4 +19,18 @@ describe("local hub", () => {
     await hub.close(); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
     expect((await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: unknown[] }).participants).toHaveLength(3);
   });
+  it("releases a dependent task only after its predecessor is done", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mireva-tasks-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
+    const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Tasks", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
+    const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Runner", agent: "mock" }) }).then((r) => r.json()) as { id: string };
+    const first = await fetch(`${hub.url}/rooms/${created.room.code}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Base" }) }).then((r) => r.json()) as { id: string; status: string };
+    const second = await fetch(`${hub.url}/rooms/${created.room.code}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Dependente", dependencies: [first.id] }) }).then((r) => r.json()) as { id: string; status: string };
+    expect(second.status).toBe("BACKLOG");
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${first.id}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id }) });
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${first.id}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id, status: "RUNNING" }) });
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${first.id}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id, status: "REVIEW" }) });
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${first.id}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id, status: "DONE", result: "entregue" }) });
+    const available = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/available`).then((r) => r.json()) as Array<{ id: string }>;
+    expect(available.map((task) => task.id)).toEqual([second.id]);
+  });
 });

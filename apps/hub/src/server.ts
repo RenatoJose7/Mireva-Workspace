@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
-import { createRoomSchema, createTaskSchema, joinRoomSchema, postEventSchema } from "@mireva/protocol";
+import { claimTaskSchema, createRoomSchema, createTaskSchema, joinRoomSchema, postEventSchema, updateTaskSchema } from "@mireva/protocol";
 import { LocalHubStore } from "./store.js";
 
 const send = (response: ServerResponse, status: number, body?: unknown): void => { response.writeHead(status, { "content-type": "application/json" }); response.end(body === undefined ? undefined : JSON.stringify(body)); };
@@ -24,7 +24,10 @@ export async function startLocalHub(options: { port?: number; dataFile: string }
         if (method === "GET" && parts[2] === "events") { const events = store.events(code, Number(url.searchParams.get("after") ?? "0")); return events ? send(response, 200, events) : send(response, 404, { error: "Room not found" }); }
         if (method === "POST" && parts[2] === "events") { const body = await readJson(request) as { participantId: string } & unknown; const input = postEventSchema.parse(body); const event = await store.event(code, body.participantId, input.kind, input.payload); return event ? send(response, 201, event) : send(response, 404, { error: "Room or participant not found" }); }
         if (method === "POST" && parts[2] === "presence") { const body = await readJson(request) as { participantId: string; state: never }; const saved = await store.presence(code, body.participantId, body.state); return saved ? send(response, 204) : send(response, 404, { error: "Room or participant not found" }); }
-        if (method === "POST" && parts[2] === "tasks") { const input = createTaskSchema.parse(await readJson(request)); const task = await store.createTask(code, input); return task ? send(response, 201, task) : send(response, 404, { error: "Room not found" }); }
+        if (method === "POST" && parts[2] === "tasks" && parts.length === 3) { const input = createTaskSchema.parse(await readJson(request)); const task = await store.createTask(code, input); return task ? send(response, 201, task) : send(response, 404, { error: "Room not found" }); }
+        if (method === "GET" && parts[2] === "tasks" && parts[3] === "available") { const tasks = store.availableTasks(code); return tasks ? send(response, 200, tasks) : send(response, 404, { error: "Room not found" }); }
+        if (method === "POST" && parts[2] === "tasks" && parts[4] === "claim") { const input = claimTaskSchema.parse(await readJson(request)); const task = await store.claimTask(code, parts[3]!, input.participantId); return task ? send(response, 200, task) : send(response, 404, { error: "Task or participant not found" }); }
+        if (method === "POST" && parts[2] === "tasks" && parts[4] === "status") { const input = updateTaskSchema.parse(await readJson(request)); const task = await store.updateTask(code, parts[3]!, input.participantId, input.status, input.result); return task ? send(response, 200, task) : send(response, 404, { error: "Task or participant not found" }); }
       }
       return send(response, 404, { error: "Not found" });
     } catch (error: unknown) { return send(response, 400, { error: error instanceof Error ? error.message : "Bad request" }); }

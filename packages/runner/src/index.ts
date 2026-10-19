@@ -9,7 +9,7 @@ export class MirevaRunner {
   private state: AgentState = "AVAILABLE";
   constructor(public readonly config: RunnerConfig, private readonly callbacks: RunnerCallbacks = {}) {}
 
-  async publish(kind: "MESSAGE" | "TASK_CREATED" | "TASK_UPDATED" | "DECISION_REQUESTED", payload: Record<string, unknown>): Promise<RoomEvent> {
+  async publish(kind: RoomEvent["kind"], payload: Record<string, unknown>): Promise<RoomEvent> {
     return this.request(`/rooms/${this.config.roomCode}/events`, { method: "POST", body: { participantId: this.config.participantId, kind, payload } }) as Promise<RoomEvent>;
   }
   async setPresence(state: AgentState): Promise<void> {
@@ -93,7 +93,7 @@ export class MirevaOrchestrator {
       if (!item.title.trim() || !item.dependencies.every((dependency) => Number.isInteger(dependency) && dependency >= 0 && dependency < index)) throw new Error(`Plano inválido na tarefa ${index + 1}`);
       tasks.push(await this.runner.createTask({ title: item.title, description: item.description, dependencies: item.dependencies.map((dependency) => tasks[dependency]!.id), priority: item.priority, acceptanceCriteria: item.acceptanceCriteria }));
     }
-    await this.runner.publish("MESSAGE", { orchestrator: { type: "PLAN_CREATED", request, summary: plan.summary, taskIds: tasks.map((task) => task.id) } });
+    await this.runner.publish("PLAN_CREATED", { orchestrator: { request, summary: plan.summary, taskIds: tasks.map((task) => task.id) } });
     return { plan, tasks };
   }
 }

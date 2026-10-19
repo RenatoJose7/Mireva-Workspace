@@ -21,7 +21,7 @@ export const participantSchema = z.object({
 });
 export type Participant = z.infer<typeof participantSchema>;
 
-export const eventKindSchema = z.enum(["PARTICIPANT_JOINED", "PRESENCE", "MESSAGE", "TASK_CREATED", "TASK_UPDATED", "DECISION_REQUESTED"]);
+export const eventKindSchema = z.enum(["PARTICIPANT_JOINED", "PRESENCE", "MESSAGE", "TASK_CREATED", "TASK_UPDATED", "DECISION_REQUESTED", "ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE", "PLAN_CREATED"]);
 export type EventKind = z.infer<typeof eventKindSchema>;
 export const eventSchema = z.object({
   id: z.string(), roomId: z.string(), sequence: z.number().int().positive(), kind: eventKindSchema,

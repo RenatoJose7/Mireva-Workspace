@@ -14,7 +14,7 @@ export class Room implements DurableObject {
       if (request.method === "POST" && path === "/create") {
         if (room) return json({ error: "Room already exists" }, 409);
         const input = createRoomSchema.parse(await request.json()); const time = now(); const ownerId = crypto.randomUUID();
-        room = { id: crypto.randomUUID(), code: new URL(request.url).searchParams.get("code")!, name: input.name, ownerId, createdAt: time, participants: [{ id: ownerId, roomId: "", name: input.ownerName, agent: "human", state: "AVAILABLE", joinedAt: time, lastSeenAt: time }], events: [], lastSequence: 0 }; room.participants[0]!.roomId = room.id; await this.save(room); return json({ room: this.snapshot(room), owner: room.participants[0] }, 201);
+        room = { id: crypto.randomUUID(), code: new URL(request.url).searchParams.get("code")!, name: input.name, ownerId, createdAt: time, participants: [{ id: ownerId, roomId: "", name: input.ownerName, agent: "human", state: "AVAILABLE", joinedAt: time, lastSeenAt: time }], events: [], lastSequence: 0 }; room.participants[0]!.roomId = room.id; await this.save(room); return json({ room: { id: room.id, code: room.code, name: room.name, ownerId: room.ownerId, createdAt: room.createdAt }, owner: room.participants[0] }, 201);
       }
       if (!room) return json({ error: "Room not found" }, 404);
       if (request.method === "GET" && path === "/") return json(this.snapshot(room));

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLocalHub, type LocalHub } from "../../../apps/hub/src/server.js";
-import { joinRunner, MirevaRunner } from "../src/index.js";
+import { joinRunner, MirevaOrchestrator, MirevaRunner } from "../src/index.js";
 import { AgentTaskExecutor, RunnerTaskWorker } from "../src/index.js";
 import { MockAgentAdapter } from "@mireva/agent-adapters";
 
@@ -33,5 +33,14 @@ describe("MirevaRunner", () => {
     const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Worker", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
     const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Runner", "mock")); await runner.createTask({ title: "Automática" });
     expect(await new RunnerTaskWorker(runner, new MockAgentAdapter(), ".").runOnce()).toBeTruthy();
+  });
+  it("creates a dependency graph from an orchestrator plan", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-orchestrator-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Plano", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
+    const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Orchestrator", "mock"));
+    const planner = { plan: async () => ({ summary: "Separar fundação e interface", tasks: [{ title: "Fundação", description: "Criar base", dependencies: [] }, { title: "Interface", description: "Criar tela", dependencies: [0] }] }) };
+    const result = await new MirevaOrchestrator(runner, planner).planAndCreate("Criar projeto");
+    expect(result.tasks.map((task) => task.status)).toEqual(["READY", "BACKLOG"]);
+    expect(result.tasks[1]!.dependencies).toEqual([result.tasks[0]!.id]);
   });
 });

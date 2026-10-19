@@ -1,0 +1,8 @@
+{
+  "name": "@mireva/hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "tsx src/main.ts", "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit -p tsconfig.json", "test": "vitest run" },
+  "dependencies": { "@mireva/protocol": "workspace:*" }
+}

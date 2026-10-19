@@ -1,0 +1,35 @@
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { URL } from "node:url";
+import { createRoomSchema, createTaskSchema, joinRoomSchema, postEventSchema } from "@mireva/protocol";
+import { LocalHubStore } from "./store.js";
+
+const send = (response: ServerResponse, status: number, body?: unknown): void => { response.writeHead(status, { "content-type": "application/json" }); response.end(body === undefined ? undefined : JSON.stringify(body)); };
+const readJson = async (request: IncomingMessage): Promise<unknown> => {
+  const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+};
+
+export interface LocalHub { url: string; close(): Promise<void>; store: LocalHubStore }
+export async function startLocalHub(options: { port?: number; dataFile: string }): Promise<LocalHub> {
+  const store = new LocalHubStore(options.dataFile); await store.load();
+  const server = createServer(async (request, response) => {
+    try {
+      const method = request.method ?? "GET"; const url = new URL(request.url ?? "/", "http://localhost"); const parts = url.pathname.split("/").filter(Boolean);
+      if (method === "GET" && url.pathname === "/health") return send(response, 200, { ok: true });
+      if (method === "POST" && url.pathname === "/rooms") { const input = createRoomSchema.parse(await readJson(request)); return send(response, 201, await store.createRoom(input.name, input.ownerName)); }
+      if (parts[0] === "rooms" && parts[1]) {
+        const code = parts[1];
+        if (method === "GET" && parts.length === 2) { const snapshot = store.snapshot(code); return snapshot ? send(response, 200, snapshot) : send(response, 404, { error: "Room not found" }); }
+        if (method === "POST" && parts[2] === "participants") { const input = joinRoomSchema.parse(await readJson(request)); const participant = await store.join(code, input.name, input.agent); return participant ? send(response, 201, participant) : send(response, 404, { error: "Room not found" }); }
+        if (method === "GET" && parts[2] === "events") { const events = store.events(code, Number(url.searchParams.get("after") ?? "0")); return events ? send(response, 200, events) : send(response, 404, { error: "Room not found" }); }
+        if (method === "POST" && parts[2] === "events") { const body = await readJson(request) as { participantId: string } & unknown; const input = postEventSchema.parse(body); const event = await store.event(code, body.participantId, input.kind, input.payload); return event ? send(response, 201, event) : send(response, 404, { error: "Room or participant not found" }); }
+        if (method === "POST" && parts[2] === "presence") { const body = await readJson(request) as { participantId: string; state: never }; const saved = await store.presence(code, body.participantId, body.state); return saved ? send(response, 204) : send(response, 404, { error: "Room or participant not found" }); }
+        if (method === "POST" && parts[2] === "tasks") { const input = createTaskSchema.parse(await readJson(request)); const task = await store.createTask(code, input); return task ? send(response, 201, task) : send(response, 404, { error: "Room not found" }); }
+      }
+      return send(response, 404, { error: "Not found" });
+    } catch (error: unknown) { return send(response, 400, { error: error instanceof Error ? error.message : "Bad request" }); }
+  });
+  await new Promise<void>((resolve) => server.listen(options.port ?? 0, "127.0.0.1", resolve));
+  const address = server.address(); if (!address || typeof address === "string") throw new Error("Unable to resolve hub address");
+  return { url: `http://127.0.0.1:${address.port}`, store, close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())) };
+}

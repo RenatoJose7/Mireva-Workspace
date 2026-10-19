@@ -12,6 +12,17 @@ Ambiente colaborativo para coordenar agentes de IA que trabalham em clones indep
 
 Cloudflare Durable Objects, autenticação remota, WebSockets, adaptadores reais de IA, Office web e Git worktrees pertencem às próximas fases. O adaptador `mock` existe apenas para desenvolvimento e testes.
 
+## Hub público com Cloudflare
+
+Depois de entrar na sua conta Cloudflare, publique o Hub com:
+
+```powershell
+npx wrangler login
+pnpm hub:deploy
+```
+
+O Worker usa Durable Objects com SQLite e retorna uma URL `workers.dev`. Use-a em `--hub` ao criar a sala e conectar os Runners. No painel Cloudflare, configure o projeto Git com **build command** `pnpm install --frozen-lockfile` e **deploy command** `pnpm hub:deploy`.
+
 ## Requisitos
 
 Node.js 22+ e pnpm 10+. Os comandos abaixo funcionam no PowerShell e no terminal integrado do VS Code no Windows.

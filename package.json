@@ -9,7 +9,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "hub": "pnpm --filter @mireva/hub start",
-    "hub:deploy": "pnpm --filter @mireva/hub-cloudflare deploy",
+    "hub:deploy": "pnpm --filter @mireva/hub-cloudflare run deploy",
     "cli": "pnpm --filter @mireva/cli mireva"
   },
   "devDependencies": {

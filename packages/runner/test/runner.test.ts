@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLocalHub, type LocalHub } from "../../../apps/hub/src/server.js";
 import { joinRunner, MirevaRunner } from "../src/index.js";
-import { AgentTaskExecutor } from "../src/index.js";
+import { AgentTaskExecutor, RunnerTaskWorker } from "../src/index.js";
 import { MockAgentAdapter } from "@mireva/agent-adapters";
 
 let hub: LocalHub | undefined;
@@ -27,5 +27,11 @@ describe("MirevaRunner", () => {
     await new AgentTaskExecutor(runner, new MockAgentAdapter()).execute(claimed, ".");
     const snapshot = await fetch(`${hub.url}/rooms/${room.room.code}`).then((r) => r.json()) as { tasks: Array<{ id: string; status: string; result: string }> };
     expect(snapshot.tasks.find((entry) => entry.id === task.id)).toMatchObject({ status: "REVIEW", result: "Entrega simulada" });
+  });
+  it("automatically claims and executes the next ready task", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-worker-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Worker", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
+    const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Runner", "mock")); await runner.createTask({ title: "Automática" });
+    expect(await new RunnerTaskWorker(runner, new MockAgentAdapter(), ".").runOnce()).toBeTruthy();
   });
 });

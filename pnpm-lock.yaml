@@ -87,6 +87,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@mireva/agent-adapters':
+        specifier: workspace:*
+        version: link:../agent-adapters
       '@mireva/runner':
         specifier: workspace:*
         version: link:../runner

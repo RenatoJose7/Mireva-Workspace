@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { MirevaRunner, joinRunner, type RunnerConfig } from "@mireva/runner";
+import { MockAgentAdapter } from "@mireva/agent-adapters";
+import { MirevaRunner, RunnerTaskWorker, joinRunner, type RunnerConfig } from "@mireva/runner";
 
 const args = process.argv.slice(2); const command = args[0];
 const value = (flag: string, fallback?: string): string | undefined => { const index = args.indexOf(flag); return index < 0 ? fallback : args[index + 1]; };
@@ -24,11 +25,12 @@ async function run(): Promise<void> {
   if (command === "task-claim") { const taskId = args[1]; if (!taskId) throw new Error("Usage: mireva task-claim ID"); return output(await new MirevaRunner(await loadState()).claimTask(taskId)); }
   if (command === "task-update") { const taskId = args[1]; const status = value("--status"); if (!taskId || !status) throw new Error("Usage: mireva task-update ID --status STATUS [--result TEXTO]"); return output(await new MirevaRunner(await loadState()).updateTask(taskId, status as never, value("--result"))); }
   if (command === "start") { const config = await loadState(); const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) }); await runner.setPresence("AVAILABLE"); if (args.includes("--once")) { await runner.poll(); await saveState(config); return; } runner.start(Number(value("--interval", "1000"))); process.on("SIGINT", () => { runner.stop(); void saveState(config).then(() => process.exit(0)); }); return; }
+  if (command === "work") { const config = await loadState(); const adapterName = value("--adapter", "mock"); if (adapterName !== "mock") throw new Error(`Adapter not installed: ${adapterName}`); const worker = new RunnerTaskWorker(new MirevaRunner(config, { onEvent: (event) => output({ event }) }), new MockAgentAdapter(), process.cwd()); const run = async () => { const taskId = await worker.runOnce(); output({ taskId: taskId ?? null, message: taskId ? "Tarefa entregue para revisão" : "Nenhuma tarefa disponível" }); await saveState(config); }; if (args.includes("--once")) return run(); const timer = setInterval(() => void run().catch((error: unknown) => console.error(error)), Number(value("--interval", "3000"))); process.on("SIGINT", () => { clearInterval(timer); void saveState(config).then(() => process.exit(0)); }); return run(); }
   if (command === "status") { const config = await loadState(); const response = await fetch(`${config.hubUrl}/rooms/${config.roomCode}`); if (!response.ok) throw new Error(await response.text()); return output(await response.json()); }
   if (command === "agents") { const config = await loadState(); const room = await fetch(`${config.hubUrl}/rooms/${config.roomCode}`).then((r) => r.json()) as { participants: unknown[] }; return output(room.participants); }
   if (command === "doctor") { const hub = value("--hub", "http://127.0.0.1:8787")!; const response = await fetch(`${hub}/health`).catch(() => undefined); return output({ node: process.version, hub, hubReachable: response?.ok ?? false, agentAdapters: ["mock"] }); }
   if (command === "leave") { await rm(stateFile(), { force: true }); return output({ left: true }); }
   throw new Error(`Unknown command: ${command}`);
 }
-function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, status, agents, task-create, tasks, task-claim ID, task-update ID, doctor, leave"); }
+function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work, status, agents, task-create, tasks, task-claim ID, task-update ID, doctor, leave"); }
 run().catch((error: unknown) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

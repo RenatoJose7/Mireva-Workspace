@@ -64,3 +64,15 @@ export class AgentTaskExecutor {
     finally { await this.runner.setPresence("AVAILABLE"); }
   }
 }
+
+export class RunnerTaskWorker {
+  constructor(private readonly runner: MirevaRunner, private readonly adapter: AgentAdapter, private readonly workingDirectory: string) {}
+  async runOnce(context: string[] = []): Promise<string | undefined> {
+    const tasks = await this.runner.availableTasks();
+    for (const task of tasks) {
+      try { const claimed = await this.runner.claimTask(task.id); await new AgentTaskExecutor(this.runner, this.adapter).execute(claimed, this.workingDirectory, context); return task.id; }
+      catch (error: unknown) { if (!(error instanceof Error) || !error.message.includes("409")) throw error; }
+    }
+    return undefined;
+  }
+}

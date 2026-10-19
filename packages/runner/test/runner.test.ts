@@ -36,11 +36,15 @@ describe("MirevaRunner", () => {
   });
   it("creates a dependency graph from an orchestrator plan", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-orchestrator-")), "hub.json") });
-    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Plano", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Plano", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
     const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Orchestrator", "mock"));
     const planner = { plan: async () => ({ summary: "Separar fundação e interface", tasks: [{ title: "Fundação", description: "Criar base", dependencies: [] }, { title: "Interface", description: "Criar tela", dependencies: [0] }] }) };
-    const result = await new MirevaOrchestrator(runner, planner).planAndCreate("Criar projeto");
-    expect(result.tasks.map((task) => task.status)).toEqual(["READY", "BACKLOG"]);
-    expect(result.tasks[1]!.dependencies).toEqual([result.tasks[0]!.id]);
+    const plan = await new MirevaOrchestrator(runner, planner).planAndPropose("Criar projeto");
+    expect(plan.status).toBe("DRAFT");
+    const owner = new MirevaRunner({ hubUrl: hub.url, roomCode: room.room.code, participantId: room.room.ownerId, name: "Owner", agent: "human", lastSequence: 0 });
+    await owner.decidePlan(plan.id, "APPROVED");
+    const tasks = (await runner.snapshot()).tasks;
+    expect(tasks.map((task) => task.status)).toEqual(["READY", "BACKLOG"]);
+    expect(tasks[1]!.dependencies).toEqual([tasks[0]!.id]);
   });
 });

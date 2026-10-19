@@ -1,5 +1,5 @@
 import type { AgentAdapter, AgentExecutionRequest } from "@mireva/agent-adapters";
-import type { AgentState, HubSnapshot, Participant, RoomEvent, Task } from "@mireva/protocol";
+import type { AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, RoomEvent, Task } from "@mireva/protocol";
 
 export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; lastSequence: number }
 export interface RunnerCallbacks { onEvent?(event: RoomEvent): void; onError?(error: Error): void }
@@ -22,6 +22,8 @@ export class MirevaRunner {
   }
   async availableTasks(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/tasks/available`) as Promise<Task[]>; }
   async snapshot(): Promise<HubSnapshot> { return this.request(`/rooms/${this.config.roomCode}`) as Promise<HubSnapshot>; }
+  async createPlan(input: { request: string; summary: string; tasks: OrchestrationPlanRecord["tasks"] }): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans`, { method: "POST", body: { participantId: this.config.participantId, ...input } }) as Promise<OrchestrationPlanRecord>; }
+  async decidePlan(planId: string, status: "APPROVED" | "REJECTED"): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans/${planId}/decision`, { method: "POST", body: { ownerId: this.config.participantId, status } }) as Promise<OrchestrationPlanRecord>; }
   async claimTask(taskId: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/claim`, { method: "POST", body: { participantId: this.config.participantId } }) as Promise<Task>; }
   async updateTask(taskId: string, status: Task["status"], result?: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/status`, { method: "POST", body: { participantId: this.config.participantId, status, result } }) as Promise<Task>; }
   async poll(): Promise<RoomEvent[]> {
@@ -86,14 +88,11 @@ export interface ProjectPlanner { plan(input: { request: string; snapshot: HubSn
 
 export class MirevaOrchestrator {
   constructor(private readonly runner: MirevaRunner, private readonly planner: ProjectPlanner) {}
-  async planAndCreate(request: string): Promise<{ plan: OrchestrationPlan; tasks: Task[] }> {
+  async planAndPropose(request: string): Promise<OrchestrationPlanRecord> {
     const plan = await this.planner.plan({ request, snapshot: await this.runner.snapshot() });
-    const tasks: Task[] = [];
     for (const [index, item] of plan.tasks.entries()) {
       if (!item.title.trim() || !item.dependencies.every((dependency) => Number.isInteger(dependency) && dependency >= 0 && dependency < index)) throw new Error(`Plano inválido na tarefa ${index + 1}`);
-      tasks.push(await this.runner.createTask({ title: item.title, description: item.description, dependencies: item.dependencies.map((dependency) => tasks[dependency]!.id), priority: item.priority, acceptanceCriteria: item.acceptanceCriteria }));
     }
-    await this.runner.publish("PLAN_CREATED", { orchestrator: { request, summary: plan.summary, taskIds: tasks.map((task) => task.id) } });
-    return { plan, tasks };
+    return this.runner.createPlan({ request, summary: plan.summary, tasks: plan.tasks.map((item) => ({ ...item, priority: item.priority ?? 50, acceptanceCriteria: item.acceptanceCriteria ?? [] })) });
   }
 }

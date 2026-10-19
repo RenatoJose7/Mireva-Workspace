@@ -37,6 +37,11 @@ export const taskSchema = z.object({
 });
 export type Task = z.infer<typeof taskSchema>;
 
+export const plannedTaskSchema = z.object({ title: z.string().min(1), description: z.string().default(""), dependencies: z.array(z.number().int().nonnegative()).default([]), priority: z.number().int().min(0).max(100).default(50), acceptanceCriteria: z.array(z.string()).default([]) });
+export const planStatusSchema = z.enum(["DRAFT", "APPROVED", "REJECTED"]);
+export const planSchema = z.object({ id: z.string(), roomId: z.string(), request: z.string(), summary: z.string(), status: planStatusSchema, tasks: z.array(plannedTaskSchema), generatedTaskIds: z.array(z.string()), createdAt: z.string(), updatedAt: z.string() });
+export type OrchestrationPlanRecord = z.infer<typeof planSchema>;
+
 export const createRoomSchema = z.object({ name: z.string().min(1).max(100), ownerName: z.string().min(1).max(80) });
 export const joinRoomSchema = z.object({ name: z.string().min(1).max(80), agent: z.string().min(1).max(80) });
 export const postEventSchema = z.object({ kind: eventKindSchema, payload: z.record(z.string(), z.unknown()).default({}) });
@@ -49,4 +54,6 @@ export const claimTaskSchema = z.object({ participantId: z.string().uuid() });
 export const updateTaskSchema = z.object({ participantId: z.string().uuid(), status: taskStatusSchema, result: z.string().max(20_000).optional() });
 export const reviewTaskSchema = z.object({ ownerId: z.string().uuid(), status: z.enum(["DONE", "WAITING_APPROVAL"]), result: z.string().max(20_000).optional() });
 
-export interface HubSnapshot { room: Room; participants: Participant[]; tasks: Task[]; lastSequence: number }
+export const createPlanSchema = z.object({ participantId: z.string().uuid(), request: z.string().min(1).max(20_000), summary: z.string().min(1).max(20_000), tasks: z.array(plannedTaskSchema).min(1).max(30) });
+export const decidePlanSchema = z.object({ ownerId: z.string().uuid(), status: z.enum(["APPROVED", "REJECTED"]) });
+export interface HubSnapshot { room: Room; participants: Participant[]; tasks: Task[]; plans: OrchestrationPlanRecord[]; lastSequence: number }

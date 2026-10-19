@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AgentState, HubSnapshot, Participant, Room, RoomEvent, Task } from "@mireva/protocol";
+import type { AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, Room, RoomEvent, Task } from "@mireva/protocol";
 
 interface StoredRoom extends HubSnapshot { events: RoomEvent[] }
 interface StoreFile { rooms: Record<string, StoredRoom> }
@@ -21,13 +21,14 @@ export class LocalHubStore {
     const id = randomUUID(); const ownerId = randomUUID(); const createdAt = now();
     const room: Room = { id, code: roomCode(), name, ownerId, createdAt };
     const owner: Participant = { id: ownerId, roomId: id, name: ownerName, agent: "human", state: "AVAILABLE", joinedAt: createdAt, lastSeenAt: createdAt };
-    this.data.rooms[room.code] = { room, participants: [owner], tasks: [], events: [], lastSequence: 0 };
+    this.data.rooms[room.code] = { room, participants: [owner], tasks: [], plans: [], events: [], lastSequence: 0 };
     await this.save(); return { room, owner };
   }
   async snapshot(code: string): Promise<HubSnapshot | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined;
     await this.refreshPresence(found);
     found.tasks ??= [];
+    found.plans ??= [];
     found.events ??= [];
     const { events: _events, ...snapshot } = found; return structuredClone(snapshot);
   }
@@ -56,6 +57,18 @@ export class LocalHubStore {
     if (!input.dependencies.every((id) => found.tasks.some((task) => task.id === id))) throw new Error("Unknown task dependency");
     const timestamp = now(); const task: Task = { ...input, id: randomUUID(), roomId: found.room.id, status: input.dependencies.length ? "BACKLOG" : "READY", assignedParticipantId: null, result: null, attempts: 0, createdAt: timestamp, updatedAt: timestamp };
     found.tasks.push(task); await this.append(found, "TASK_CREATED", null, { task }); await this.save(); return structuredClone(task);
+  }
+  async createPlan(code: string, participantId: string, input: { request: string; summary: string; tasks: OrchestrationPlanRecord["tasks"] }): Promise<OrchestrationPlanRecord | undefined> {
+    const found = this.data.rooms[code]; if (!found || !found.participants.some((participant) => participant.id === participantId)) return undefined;
+    found.plans ??= []; const timestamp = now(); const plan: OrchestrationPlanRecord = { id: randomUUID(), roomId: found.room.id, request: input.request, summary: input.summary, status: "DRAFT", tasks: input.tasks, generatedTaskIds: [], createdAt: timestamp, updatedAt: timestamp };
+    found.plans.push(plan); await this.append(found, "PLAN_CREATED", participantId, { plan }); await this.save(); return structuredClone(plan);
+  }
+  async decidePlan(code: string, planId: string, ownerId: string, status: "APPROVED" | "REJECTED"): Promise<OrchestrationPlanRecord | undefined> {
+    const found = this.data.rooms[code]; if (!found || found.room.ownerId !== ownerId) return undefined; found.plans ??= []; found.tasks ??= []; const plan = found.plans.find((entry) => entry.id === planId);
+    if (!plan) return undefined; if (plan.status !== "DRAFT") throw new Error("Plan is no longer awaiting decision");
+    plan.status = status; plan.updatedAt = now();
+    if (status === "APPROVED") { const created: Task[] = []; for (const item of plan.tasks) { if (!item.dependencies.every((dependency) => Number.isInteger(dependency) && dependency >= 0 && dependency < created.length)) throw new Error("Invalid plan dependency"); const timestamp = now(); const task: Task = { id: randomUUID(), roomId: found.room.id, title: item.title, description: item.description, dependencies: item.dependencies.map((dependency) => created[dependency]!.id), priority: item.priority, requiredCapabilities: [], acceptanceCriteria: item.acceptanceCriteria, maxAttempts: 3, status: item.dependencies.length ? "BACKLOG" : "READY", assignedParticipantId: null, result: null, attempts: 0, createdAt: timestamp, updatedAt: timestamp }; created.push(task); found.tasks.push(task); await this.append(found, "TASK_CREATED", null, { task, planId: plan.id }); } plan.generatedTaskIds = created.map((task) => task.id); }
+    await this.append(found, "PLAN_CREATED", ownerId, { plan, decision: status }); await this.save(); return structuredClone(plan);
   }
   async claimTask(code: string, taskId: string, participantId: string): Promise<Task | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined; found.tasks ??= []; const task = found.tasks.find((entry) => entry.id === taskId);

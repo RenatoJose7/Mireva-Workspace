@@ -18,6 +18,7 @@ export class Room implements DurableObject {
       }
       if (!room) return json({ error: "Room not found" }, 404);
       room.tasks ??= [];
+      room.events ??= [];
       if (request.method === "GET" && path === "/") return json(this.snapshot(room));
       if (request.method === "POST" && path === "/participants") { const input = joinRoomSchema.parse(await request.json()); const participant: Participant = { id: crypto.randomUUID(), roomId: room.id, name: input.name, agent: input.agent, state: "AVAILABLE", joinedAt: now(), lastSeenAt: now() }; room.participants.push(participant); this.event(room, "PARTICIPANT_JOINED", participant.id, { participant }); await this.save(room); return json(participant, 201); }
       if (request.method === "GET" && path === "/events") return json(room.events.filter((e) => e.sequence > Number(new URL(request.url).searchParams.get("after") ?? 0)));

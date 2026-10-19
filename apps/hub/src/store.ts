@@ -27,11 +27,13 @@ export class LocalHubStore {
   snapshot(code: string): HubSnapshot | undefined {
     const found = this.data.rooms[code]; if (!found) return undefined;
     found.tasks ??= [];
+    found.events ??= [];
     const { events: _events, ...snapshot } = found; return structuredClone(snapshot);
   }
   async join(code: string, name: string, agent: string): Promise<Participant | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined;
     found.tasks ??= [];
+    found.events ??= [];
     if (found.participants.length >= 6) throw new Error("Room capacity reached");
     const participant: Participant = { id: randomUUID(), roomId: found.room.id, name, agent, state: "AVAILABLE", joinedAt: now(), lastSeenAt: now() };
     found.participants.push(participant); await this.append(found, "PARTICIPANT_JOINED", participant.id, { participant }); await this.save(); return structuredClone(participant);
@@ -49,6 +51,7 @@ export class LocalHubStore {
   async createTask(code: string, input: Omit<Task, "id" | "roomId" | "status" | "createdAt" | "updatedAt" | "assignedParticipantId" | "result" | "attempts">): Promise<Task | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined;
     found.tasks ??= [];
+    found.events ??= [];
     if (!input.dependencies.every((id) => found.tasks.some((task) => task.id === id))) throw new Error("Unknown task dependency");
     const timestamp = now(); const task: Task = { ...input, id: randomUUID(), roomId: found.room.id, status: input.dependencies.length ? "BACKLOG" : "READY", assignedParticipantId: null, result: null, attempts: 0, createdAt: timestamp, updatedAt: timestamp };
     found.tasks.push(task); await this.append(found, "TASK_CREATED", null, { task }); await this.save(); return structuredClone(task);

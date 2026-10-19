@@ -47,5 +47,6 @@ export const createTaskSchema = z.object({
 });
 export const claimTaskSchema = z.object({ participantId: z.string().uuid() });
 export const updateTaskSchema = z.object({ participantId: z.string().uuid(), status: taskStatusSchema, result: z.string().max(20_000).optional() });
+export const reviewTaskSchema = z.object({ ownerId: z.string().uuid(), status: z.enum(["DONE", "WAITING_APPROVAL"]), result: z.string().max(20_000).optional() });
 
 export interface HubSnapshot { room: Room; participants: Participant[]; tasks: Task[]; lastSequence: number }

@@ -74,6 +74,14 @@ export class LocalHubStore {
     if (task.status === "DONE") for (const candidate of found.tasks) if (candidate.status === "BACKLOG" && candidate.dependencies.every((id) => found.tasks.some((dependency) => dependency.id === id && dependency.status === "DONE"))) { candidate.status = "READY"; candidate.updatedAt = now(); await this.append(found, "TASK_UPDATED", null, { task: candidate }); }
     await this.save(); return structuredClone(task);
   }
+  async reviewTask(code: string, taskId: string, ownerId: string, status: "DONE" | "WAITING_APPROVAL", result?: string): Promise<Task | undefined> {
+    const found = this.data.rooms[code]; if (!found || found.room.ownerId !== ownerId) return undefined; found.tasks ??= []; const task = found.tasks.find((entry) => entry.id === taskId);
+    if (!task) return undefined;
+    if (task.status !== "REVIEW") throw new Error("Task is not awaiting review");
+    task.status = status; task.result = result ?? task.result; task.updatedAt = now(); await this.append(found, "TASK_UPDATED", ownerId, { task, decision: status === "DONE" ? "APPROVED" : "CHANGES_REQUESTED" });
+    if (task.status === "DONE") for (const candidate of found.tasks) if (candidate.status === "BACKLOG" && candidate.dependencies.every((id) => found.tasks.some((dependency) => dependency.id === id && dependency.status === "DONE"))) { candidate.status = "READY"; candidate.updatedAt = now(); await this.append(found, "TASK_UPDATED", null, { task: candidate }); }
+    await this.save(); return structuredClone(task);
+  }
   availableTasks(code: string): Task[] | undefined { const found = this.data.rooms[code]; if (!found) return undefined; found.tasks ??= []; return structuredClone(found.tasks.filter((task) => task.status === "READY").sort((a, b) => b.priority - a.priority)); }
   private async append(room: StoredRoom, kind: RoomEvent["kind"], participantId: string | null, payload: Record<string, unknown>): Promise<RoomEvent> {
     const event: RoomEvent = { id: randomUUID(), roomId: room.room.id, sequence: ++room.lastSequence, kind, participantId, payload, createdAt: now() };

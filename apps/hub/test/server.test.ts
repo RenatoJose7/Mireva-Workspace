@@ -42,4 +42,15 @@ describe("local hub", () => {
     const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; state: string }> };
     expect(snapshot.participants.find((entry) => entry.id === runner.id)?.state).toBe("DISCONNECTED");
   });
+  it("lets the room owner approve a reviewed task", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mireva-review-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
+    const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Review", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
+    const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Runner", agent: "mock" }) }).then((r) => r.json()) as { id: string };
+    const task = await fetch(`${hub.url}/rooms/${created.room.code}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Revisar" }) }).then((r) => r.json()) as { id: string };
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id }) });
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id, status: "RUNNING" }) });
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id, status: "REVIEW" }) });
+    const decision = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/decision`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ownerId: created.room.ownerId, status: "DONE", result: "Aprovada" }) }).then((r) => r.json()) as { status: string; result: string };
+    expect(decision).toMatchObject({ status: "DONE", result: "Aprovada" });
+  });
 });

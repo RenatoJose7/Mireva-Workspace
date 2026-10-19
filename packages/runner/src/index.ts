@@ -1,4 +1,4 @@
-import type { AgentState, Participant, RoomEvent } from "@mireva/protocol";
+import type { AgentState, Participant, RoomEvent, Task } from "@mireva/protocol";
 
 export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; lastSequence: number }
 export interface RunnerCallbacks { onEvent?(event: RoomEvent): void; onError?(error: Error): void }
@@ -13,6 +13,12 @@ export class MirevaRunner {
   async setPresence(state: AgentState): Promise<void> {
     await this.request(`/rooms/${this.config.roomCode}/presence`, { method: "POST", body: { participantId: this.config.participantId, state } });
   }
+  async createTask(input: { title: string; description?: string; dependencies?: string[]; priority?: number; acceptanceCriteria?: string[] }): Promise<Task> {
+    return this.request(`/rooms/${this.config.roomCode}/tasks`, { method: "POST", body: input }) as Promise<Task>;
+  }
+  async availableTasks(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/tasks/available`) as Promise<Task[]>; }
+  async claimTask(taskId: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/claim`, { method: "POST", body: { participantId: this.config.participantId } }) as Promise<Task>; }
+  async updateTask(taskId: string, status: Task["status"], result?: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/status`, { method: "POST", body: { participantId: this.config.participantId, status, result } }) as Promise<Task>; }
   async poll(): Promise<RoomEvent[]> {
     const events = await this.request(`/rooms/${this.config.roomCode}/events?after=${this.config.lastSequence}&participantId=${this.config.participantId}`) as RoomEvent[];
     for (const event of events) { this.config.lastSequence = Math.max(this.config.lastSequence, event.sequence); this.callbacks.onEvent?.(event); }

@@ -32,3 +32,5 @@ export class MockAgentAdapter implements AgentAdapter {
   async cancelTask(taskId: string): Promise<void> { const execution = this.executions.get(taskId); if (!execution || execution.result) return; execution.cancelled = true; const completedAt = new Date().toISOString(); execution.events.push({ type: "CANCELLED", message: "Execução cancelada", at: completedAt }); execution.result = { taskId, status: "CANCELLED", summary: "Cancelada pelo usuário", files: [], startedAt: execution.events[0]!.at, completedAt }; }
   async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { return this.executions.get(taskId)?.result; }
 }
+
+export { CodexCliAdapter, buildCodexPrompt } from "./codex.js";

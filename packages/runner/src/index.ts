@@ -54,6 +54,7 @@ export class AgentTaskExecutor {
     const request: AgentExecutionRequest = { taskId: task.id, title: task.title, instructions: task.description, workingDirectory, context };
     await this.runner.setPresence("WORKING");
     await this.runner.updateTask(task.id, "RUNNING");
+    const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
     try {
       await this.adapter.executeTask(request);
       for await (const event of this.adapter.streamEvents(task.id)) await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, event });
@@ -61,7 +62,7 @@ export class AgentTaskExecutor {
       if (result?.status === "COMPLETED") await this.runner.updateTask(task.id, "REVIEW", result.summary);
       else await this.runner.updateTask(task.id, "FAILED", result?.summary ?? "O agente não retornou uma entrega");
     } catch (error: unknown) { await this.runner.updateTask(task.id, "FAILED", error instanceof Error ? error.message : String(error)); throw error; }
-    finally { await this.runner.setPresence("AVAILABLE"); }
+    finally { clearInterval(heartbeat); await this.runner.setPresence("AVAILABLE"); }
   }
 }
 

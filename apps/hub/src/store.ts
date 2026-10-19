@@ -24,8 +24,9 @@ export class LocalHubStore {
     this.data.rooms[room.code] = { room, participants: [owner], tasks: [], events: [], lastSequence: 0 };
     await this.save(); return { room, owner };
   }
-  snapshot(code: string): HubSnapshot | undefined {
+  async snapshot(code: string): Promise<HubSnapshot | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined;
+    await this.refreshPresence(found);
     found.tasks ??= [];
     found.events ??= [];
     const { events: _events, ...snapshot } = found; return structuredClone(snapshot);
@@ -47,7 +48,7 @@ export class LocalHubStore {
     const found = this.data.rooms[code]; if (!found || !found.participants.some((p) => p.id === participantId)) return undefined;
     const event = await this.append(found, kind, participantId, payload); await this.save(); return structuredClone(event);
   }
-  events(code: string, after: number): RoomEvent[] | undefined { const room = this.data.rooms[code]; return room && structuredClone(room.events.filter((event) => event.sequence > after)); }
+  async events(code: string, after: number): Promise<RoomEvent[] | undefined> { const room = this.data.rooms[code]; if (!room) return undefined; await this.refreshPresence(room); return structuredClone(room.events.filter((event) => event.sequence > after)); }
   async createTask(code: string, input: Omit<Task, "id" | "roomId" | "status" | "createdAt" | "updatedAt" | "assignedParticipantId" | "result" | "attempts">): Promise<Task | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined;
     found.tasks ??= [];
@@ -77,6 +78,12 @@ export class LocalHubStore {
   private async append(room: StoredRoom, kind: RoomEvent["kind"], participantId: string | null, payload: Record<string, unknown>): Promise<RoomEvent> {
     const event: RoomEvent = { id: randomUUID(), roomId: room.room.id, sequence: ++room.lastSequence, kind, participantId, payload, createdAt: now() };
     room.events.push(event); return event;
+  }
+  private async refreshPresence(room: StoredRoom): Promise<void> {
+    const cutoff = Date.now() - 20_000; let changed = false;
+    for (const participant of room.participants) if (participant.state !== "DISCONNECTED" && Date.parse(participant.lastSeenAt) < cutoff) { participant.state = "DISCONNECTED"; await this.append(room, "PRESENCE", participant.id, { state: "DISCONNECTED" }); changed = true; }
+    for (const task of room.tasks) if (task.assignedParticipantId && ["CLAIMED", "RUNNING", "REVIEW"].includes(task.status) && room.participants.some((participant) => participant.id === task.assignedParticipantId && participant.state === "DISCONNECTED")) { task.status = "BLOCKED"; task.updatedAt = now(); await this.append(room, "TASK_UPDATED", null, { task, reason: "ASSIGNEE_DISCONNECTED" }); changed = true; }
+    if (changed) await this.save();
   }
   private async save(): Promise<void> {
     this.writeChain = this.writeChain.then(async () => { await mkdir(dirname(this.filename), { recursive: true }); const temp = `${this.filename}.tmp`; await writeFile(temp, JSON.stringify(this.data, null, 2)); await rename(temp, this.filename); });

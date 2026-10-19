@@ -33,4 +33,13 @@ describe("local hub", () => {
     const available = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/available`).then((r) => r.json()) as Array<{ id: string }>;
     expect(available.map((task) => task.id)).toEqual([second.id]);
   });
+  it("marks stale participants as disconnected when the room is read", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mireva-presence-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
+    const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Presence", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
+    const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Runner", agent: "mock" }) }).then((r) => r.json()) as { id: string };
+    const raw = (hub.store as unknown as { data: { rooms: Record<string, { participants: Array<{ id: string; lastSeenAt: string }> }> } }).data;
+    raw.rooms[created.room.code]!.participants.find((entry) => entry.id === runner.id)!.lastSeenAt = new Date(Date.now() - 21_000).toISOString();
+    const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; state: string }> };
+    expect(snapshot.participants.find((entry) => entry.id === runner.id)?.state).toBe("DISCONNECTED");
+  });
 });

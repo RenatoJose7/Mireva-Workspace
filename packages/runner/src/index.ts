@@ -5,14 +5,17 @@ export interface RunnerCallbacks { onEvent?(event: RoomEvent): void; onError?(er
 
 export class MirevaRunner {
   private timer: NodeJS.Timeout | undefined;
+  private state: AgentState = "AVAILABLE";
   constructor(public readonly config: RunnerConfig, private readonly callbacks: RunnerCallbacks = {}) {}
 
   async publish(kind: "MESSAGE" | "TASK_CREATED" | "TASK_UPDATED" | "DECISION_REQUESTED", payload: Record<string, unknown>): Promise<RoomEvent> {
     return this.request(`/rooms/${this.config.roomCode}/events`, { method: "POST", body: { participantId: this.config.participantId, kind, payload } }) as Promise<RoomEvent>;
   }
   async setPresence(state: AgentState): Promise<void> {
+    this.state = state;
     await this.request(`/rooms/${this.config.roomCode}/presence`, { method: "POST", body: { participantId: this.config.participantId, state } });
   }
+  async heartbeat(): Promise<void> { await this.setPresence(this.state); }
   async createTask(input: { title: string; description?: string; dependencies?: string[]; priority?: number; acceptanceCriteria?: string[] }): Promise<Task> {
     return this.request(`/rooms/${this.config.roomCode}/tasks`, { method: "POST", body: input }) as Promise<Task>;
   }
@@ -26,8 +29,8 @@ export class MirevaRunner {
   }
   start(intervalMs = 1_000): void {
     if (this.timer) return;
-    void this.poll().catch((error: unknown) => this.callbacks.onError?.(error instanceof Error ? error : new Error(String(error))));
-    this.timer = setInterval(() => void this.poll().catch((error: unknown) => this.callbacks.onError?.(error instanceof Error ? error : new Error(String(error)))), intervalMs);
+    const tick = async () => { try { await this.heartbeat(); await this.poll(); } catch (error: unknown) { this.callbacks.onError?.(error instanceof Error ? error : new Error(String(error))); } };
+    void tick(); this.timer = setInterval(() => void tick(), intervalMs);
   }
   stop(): void { if (this.timer) clearInterval(this.timer); this.timer = undefined; }
   private async request(path: string, options: { method?: string; body?: Record<string, unknown> } = {}): Promise<unknown> {

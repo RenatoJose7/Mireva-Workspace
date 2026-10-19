@@ -20,6 +20,7 @@ export class Room implements DurableObject {
       if (!Array.isArray(room.tasks)) room.tasks = [];
       if (!Array.isArray(room.events)) room.events = [];
       if (!Array.isArray(room.participants)) room.participants = [];
+      await this.refreshPresence(room);
       if (request.method === "GET" && path === "/") return json(this.snapshot(room));
       if (request.method === "POST" && path === "/participants") { const input = joinRoomSchema.parse(await request.json()); const participant: Participant = { id: crypto.randomUUID(), roomId: room.id, name: input.name, agent: input.agent, state: "AVAILABLE", joinedAt: now(), lastSeenAt: now() }; room.participants.push(participant); this.event(room, "PARTICIPANT_JOINED", participant.id, { participant }); await this.save(room); return json(participant, 201); }
       if (request.method === "GET" && path === "/events") return json(room.events.filter((e) => e.sequence > Number(new URL(request.url).searchParams.get("after") ?? 0)));
@@ -35,6 +36,12 @@ export class Room implements DurableObject {
   private event(room: RoomState, kind: RoomEvent["kind"], participantId: string | null, payload: Record<string, unknown>): RoomEvent { if (!Array.isArray(room.events)) room.events = []; const event: RoomEvent = { id: crypto.randomUUID(), roomId: room.id, sequence: ++room.lastSequence, kind, participantId, payload, createdAt: now() }; room.events.push(event); return event; }
   private snapshot(room: RoomState) { return { room: { id: room.id, code: room.code, name: room.name, ownerId: room.ownerId, createdAt: room.createdAt }, participants: room.participants, tasks: room.tasks, lastSequence: room.lastSequence }; }
   private save(room: RoomState) { return this.state.storage.put("room", room); }
+  private async refreshPresence(room: RoomState): Promise<void> {
+    const cutoff = Date.now() - 20_000; let changed = false;
+    for (const participant of room.participants) if (participant.state !== "DISCONNECTED" && Date.parse(participant.lastSeenAt) < cutoff) { participant.state = "DISCONNECTED"; this.event(room, "PRESENCE", participant.id, { state: "DISCONNECTED" }); changed = true; }
+    for (const task of room.tasks) if (task.assignedParticipantId && ["CLAIMED", "RUNNING", "REVIEW"].includes(task.status) && room.participants.some((participant) => participant.id === task.assignedParticipantId && participant.state === "DISCONNECTED")) { task.status = "BLOCKED"; task.updatedAt = now(); this.event(room, "TASK_UPDATED", null, { task, reason: "ASSIGNEE_DISCONNECTED" }); changed = true; }
+    if (changed) await this.save(room);
+  }
 }
 
 export default {

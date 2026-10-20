@@ -42,10 +42,10 @@ async function run(): Promise<void> {
     if (args.includes("--once")) return run(); const timer = setInterval(() => void run().catch((error: unknown) => console.error(error)), Number(value("--interval", "3000"))); process.on("SIGINT", () => { clearInterval(timer); void saveState(config).then(() => process.exit(0)); }); return run();
   }
   if (command === "orchestrate") {
-    const config = await loadState(); const adapter = createAdapter(value("--adapter", "copilot")!);
+    const config = await loadState(); const adapter = createAdapter(value("--adapter", "codex")!);
     const detection = await adapter.detect(); if (!detection.installed) throw new Error(detection.reason ?? `Adapter ${adapter.id} não instalado`);
     const authentication = await adapter.checkAuthentication(); if (!authentication.authenticated) throw new Error(authentication.reason ?? `Adapter ${adapter.id} não autenticado`);
-    if (!isProjectPlanningAdapter(adapter)) throw new Error(`O adapter ${adapter.id} ainda não cria planos. Use copilot.`);
+    if (!isProjectPlanningAdapter(adapter)) throw new Error(`O adapter ${adapter.id} ainda não cria planos. Use codex ou copilot.`);
     const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) });
     const worker = new OrchestratorWorker(runner, new MirevaOrchestrator(runner, new AdapterProjectPlanner(adapter, workingDirectory())));
     let running = false;
@@ -58,5 +58,5 @@ async function run(): Promise<void> {
   if (command === "leave") { await rm(stateFile(), { force: true }); return output({ left: true }); }
   throw new Error(`Unknown command: ${command}`);
 }
-function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot, orchestrate --adapter copilot, status, agents, task-create, tasks, task-claim ID, task-update ID, doctor --adapter mock|codex|copilot, leave"); }
+function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot, orchestrate --adapter codex|copilot, status, agents, task-create, tasks, task-claim ID, task-update ID, doctor --adapter mock|codex|copilot, leave"); }
 run().catch((error: unknown) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

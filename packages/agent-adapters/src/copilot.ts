@@ -21,7 +21,7 @@ export const buildCopilotPlanningPrompt = (request: AgentPlanningRequest): strin
   "Crie entre 1 e 30 tarefas pequenas e executáveis. dependencies usa índices de tarefas anteriores; use [] quando não houver dependência. requiredCapabilities deve usar apenas capacidades que existam entre os agentes conectados quando possível."
 ].join("\n\n");
 
-export const parseCopilotPlan = (output: string): AgentPlan => {
+export const parseAgentPlan = (output: string): AgentPlan => {
   const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
   const candidate = (fenced ?? output).trim();
   const json = candidate.startsWith("{") ? candidate : candidate.slice(candidate.indexOf("{"), candidate.lastIndexOf("}") + 1);
@@ -38,6 +38,7 @@ export const parseCopilotPlan = (output: string): AgentPlan => {
   });
   return { summary: value.summary, tasks };
 };
+export const parseCopilotPlan = parseAgentPlan;
 
 /** Adapter for the GitHub Copilot CLI. It intentionally does not enable broad tool approval flags. */
 export class CopilotCliAdapter implements AgentAdapter, ProjectPlanningAdapter {

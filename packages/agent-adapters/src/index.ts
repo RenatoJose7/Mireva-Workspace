@@ -38,5 +38,5 @@ export class MockAgentAdapter implements AgentAdapter {
   async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { return this.executions.get(taskId)?.result; }
 }
 
-export { CodexCliAdapter, buildCodexPrompt } from "./codex.js";
-export { CopilotCliAdapter, buildCopilotPlanningPrompt, buildCopilotPrompt, parseCopilotPlan } from "./copilot.js";
+export { CodexCliAdapter, buildCodexPlanningPrompt, buildCodexPrompt, parseCodexPlanOutput } from "./codex.js";
+export { CopilotCliAdapter, buildCopilotPlanningPrompt, buildCopilotPrompt, parseAgentPlan, parseCopilotPlan } from "./copilot.js";

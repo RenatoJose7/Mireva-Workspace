@@ -1,16 +1,27 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { AgentAdapter, AgentCapability, AdapterAuthentication, AdapterDetection, AgentExecutionEvent, AgentExecutionRequest, AgentExecutionResult } from "./index.js";
+import type { AgentAdapter, AgentCapability, AdapterAuthentication, AdapterDetection, AgentExecutionEvent, AgentExecutionRequest, AgentExecutionResult, AgentPlan, AgentPlanningRequest, ProjectPlanningAdapter } from "./index.js";
+import { parseAgentPlan } from "./copilot.js";
 
 interface Execution { process: ChildProcessWithoutNullStreams; events: AgentExecutionEvent[]; workingDirectory: string; result?: AgentExecutionResult }
 const at = () => new Date().toISOString();
 export const buildCodexPrompt = (request: AgentExecutionRequest): string => [`Você está executando uma tarefa do Mireva Workspace.`, `Título: ${request.title}`, `Instruções: ${request.instructions}`, request.context.length ? `Contexto relevante:\n${request.context.join("\n")}` : "", "Trabalhe somente no diretório autorizado. Não faça operações destrutivas, force push, merge ou publicação. Ao terminar, explique resumidamente a entrega."].filter(Boolean).join("\n\n");
+export const buildCodexPlanningPrompt = (request: AgentPlanningRequest): string => ["Você é o orquestrador de tarefas do Mireva Workspace. Não altere arquivos e não execute comandos: apenas planeje o trabalho.", `Pedido do responsável:\n${request.request}`, `Estado atual do projeto e dos agentes:\n${request.projectContext}`, "Responda SOMENTE com JSON válido, sem Markdown, usando exatamente este formato:", '{"summary":"resumo curto","tasks":[{"title":"título","description":"instruções objetivas","dependencies":[0],"priority":50,"requiredCapabilities":["CODE"],"acceptanceCriteria":["critério verificável"]}]}', "Crie entre 1 e 30 tarefas pequenas e executáveis. dependencies usa índices de tarefas anteriores; use [] quando não houver dependência. requiredCapabilities deve usar apenas capacidades que existam entre os agentes conectados quando possível."].join("\n\n");
+export const parseCodexPlanOutput = (output: string): AgentPlan => {
+  const messages = output.split("\n").flatMap((line) => { try { const event = JSON.parse(line) as { item?: { type?: string; text?: string } }; return event.item?.type === "agent_message" && typeof event.item.text === "string" ? [event.item.text] : []; } catch { return []; } });
+  return parseAgentPlan(messages.join("\n") || output);
+};
 
-export class CodexCliAdapter implements AgentAdapter {
+export class CodexCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
   readonly id = "codex";
   private readonly executions = new Map<string, Execution>();
   async detect(): Promise<AdapterDetection> { const outcome = await this.run("codex", ["--version"]); const version = outcome.output.match(/codex-cli\s+[^\s]+/)?.[0]; return outcome.code === 0 ? { installed: true, version: version ?? outcome.output.trim() } : { installed: false, reason: "Codex CLI não encontrado" }; }
   async checkAuthentication(): Promise<AdapterAuthentication> { const outcome = await this.run("codex", ["login", "status"]); return outcome.code === 0 ? { authenticated: true } : { authenticated: false, reason: outcome.output.trim() || "Codex não autenticado" }; }
   async getCapabilities(): Promise<AgentCapability[]> { return ["CODE", "RESEARCH", "TEST", "GIT", "STRUCTURED_OUTPUT", "CANCEL"]; }
+  async planProject(request: AgentPlanningRequest): Promise<AgentPlan> {
+    const outcome = await this.run("codex", ["exec", "--json", "-C", request.workingDirectory, buildCodexPlanningPrompt(request)]);
+    if (outcome.code !== 0) throw new Error(outcome.output.trim() || `Codex saiu com código ${outcome.code} ao criar o plano`);
+    return parseCodexPlanOutput(outcome.output);
+  }
   async executeTask(request: AgentExecutionRequest): Promise<void> {
     if (this.executions.has(request.taskId)) throw new Error("Task already executing");
     const startedAt = at(); const child = spawn("codex", ["exec", "--json", "-C", request.workingDirectory, buildCodexPrompt(request)], { stdio: "pipe", windowsHide: true });

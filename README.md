@@ -81,7 +81,7 @@ O Mireva chama `copilot -p` dentro do diretório em que o comando foi iniciado. 
 
 ## Conversar com o orquestrador
 
-O painel **Orquestrador** do Office envia pedidos para a sala. Para que eles virem tarefas, deixe um runner exclusivo de planejamento com o Copilot CLI conectado. Ele lê o pedido, considera os agentes e capacidades presentes na sala e cria um **plano em rascunho**. Nenhuma tarefa é executada antes de você aprovar o plano no Office.
+O painel **Orquestrador** do Office envia pedidos para a sala. Para que eles virem tarefas, deixe um runner exclusivo de planejamento com o Codex CLI ou GitHub Copilot CLI conectado. Ele lê o pedido, considera os agentes e capacidades presentes na sala e cria um **plano em rascunho**. Nenhuma tarefa é executada antes de você aprovar o plano no Office.
 
 Antes do primeiro uso, atualize o repositório e publique a versão nova do Hub para que ele aceite planos:
 
@@ -92,11 +92,11 @@ pnpm hub:deploy
 ```
 
 ```powershell
-pnpm cli join 2B7E325E -- --hub https://mireva-hub.renatojosesfc.workers.dev --name "Orquestrador Copilot" --agent copilot --capabilities ORCHESTRATE --state .mireva\orchestrator.json
-pnpm cli orchestrate -- --state .mireva\orchestrator.json --adapter copilot
+pnpm cli join 2B7E325E -- --hub https://mireva-hub.renatojosesfc.workers.dev --name "Orquestrador Codex" --agent codex --capabilities ORCHESTRATE --state .mireva\orchestrator.json
+pnpm cli orchestrate -- --state .mireva\orchestrator.json --adapter codex
 ```
 
-Depois, escreva o objetivo no Office. O processo `orchestrate` responde com o plano, o Office mostra as tarefas e suas dependências, você aprova e clica em **Distribuir tarefas prontas**. Os runners de Codex/Copilot então executam apenas as tarefas compatíveis com as suas capacidades.
+Use `--adapter copilot` se preferir o Copilot como planejador. Depois, escreva o objetivo no Office. O processo `orchestrate` responde com o plano, o Office mostra as tarefas e suas dependências, você aprova e clica em **Distribuir tarefas prontas**. Os runners de Codex/Copilot então executam apenas as tarefas compatíveis com as suas capacidades.
 
 ## Distribuição por capacidade
 

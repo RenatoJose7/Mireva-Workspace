@@ -4,6 +4,8 @@ export const agentStateSchema = z.enum([
   "AVAILABLE", "WORKING", "RESEARCHING", "TESTING", "WAITING_APPROVAL", "BLOCKED", "DISCONNECTED",
 ]);
 export type AgentState = z.infer<typeof agentStateSchema>;
+export const agentRoleSchema = z.enum(["GENERAL", "ORCHESTRATOR", "DEVELOPMENT", "RESEARCH", "TEST", "REVIEW"]);
+export type AgentRole = z.infer<typeof agentRoleSchema>;
 
 export const taskStatusSchema = z.enum([
   "BACKLOG", "READY", "CLAIMED", "RUNNING", "REVIEW", "DONE", "FAILED", "BLOCKED", "CANCELLED", "WAITING_APPROVAL",
@@ -17,11 +19,11 @@ export type Room = z.infer<typeof roomSchema>;
 
 export const participantSchema = z.object({
   id: z.string(), roomId: z.string(), name: z.string(), agent: z.string(), state: agentStateSchema,
-  capabilities: z.array(z.string()).default([]), joinedAt: z.string(), lastSeenAt: z.string(),
+  role: agentRoleSchema.default("GENERAL"), capabilities: z.array(z.string()).default([]), joinedAt: z.string(), lastSeenAt: z.string(),
 });
 export type Participant = z.infer<typeof participantSchema>;
 
-export const eventKindSchema = z.enum(["PARTICIPANT_JOINED", "PRESENCE", "MESSAGE", "TASK_CREATED", "TASK_UPDATED", "DECISION_REQUESTED", "ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE", "PLAN_CREATED"]);
+export const eventKindSchema = z.enum(["PARTICIPANT_JOINED", "PARTICIPANT_CONFIGURED", "PRESENCE", "MESSAGE", "TASK_CREATED", "TASK_UPDATED", "DECISION_REQUESTED", "ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE", "PLAN_CREATED"]);
 export type EventKind = z.infer<typeof eventKindSchema>;
 export const eventSchema = z.object({
   id: z.string(), roomId: z.string(), sequence: z.number().int().positive(), kind: eventKindSchema,
@@ -43,7 +45,8 @@ export const planSchema = z.object({ id: z.string(), roomId: z.string(), request
 export type OrchestrationPlanRecord = z.infer<typeof planSchema>;
 
 export const createRoomSchema = z.object({ name: z.string().min(1).max(100), ownerName: z.string().min(1).max(80) });
-export const joinRoomSchema = z.object({ name: z.string().min(1).max(80), agent: z.string().min(1).max(80), capabilities: z.array(z.string()).default([]) });
+export const joinRoomSchema = z.object({ name: z.string().min(1).max(80), agent: z.string().min(1).max(80), role: agentRoleSchema.default("GENERAL"), capabilities: z.array(z.string()).default([]) });
+export const configureParticipantSchema = z.object({ ownerId: z.string().uuid(), role: agentRoleSchema, capabilities: z.array(z.string().min(1).max(40)).max(12) });
 export const postEventSchema = z.object({ kind: eventKindSchema, payload: z.record(z.string(), z.unknown()).default({}) });
 export const createTaskSchema = z.object({
   title: z.string().min(1), description: z.string().default(""), dependencies: z.array(z.string()).default([]),

@@ -42,6 +42,16 @@ describe("local hub", () => {
     const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; state: string }> };
     expect(snapshot.participants.find((entry) => entry.id === runner.id)?.state).toBe("DISCONNECTED");
   });
+  it("lets the room owner configure a runner role and capabilities", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mireva-roles-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
+    const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Roles", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
+    const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Copilot", agent: "copilot" }) }).then((r) => r.json()) as { id: string; role: string };
+    expect(runner.role).toBe("GENERAL");
+    const updated = await fetch(`${hub.url}/rooms/${created.room.code}/participants/${runner.id}/config`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ownerId: created.room.ownerId, role: "DEVELOPMENT", capabilities: ["CODE", "TEST"] }) }).then((r) => r.json()) as { role: string; capabilities: string[] };
+    expect(updated).toEqual(expect.objectContaining({ role: "DEVELOPMENT", capabilities: ["CODE", "TEST"] }));
+    const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; role: string; capabilities: string[] }> };
+    expect(snapshot.participants.find((participant) => participant.id === runner.id)).toMatchObject({ role: "DEVELOPMENT", capabilities: ["CODE", "TEST"] });
+  });
   it("lets the room owner approve a reviewed task", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mireva-review-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
     const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Review", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };

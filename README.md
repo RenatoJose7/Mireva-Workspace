@@ -8,7 +8,7 @@ Ambiente colaborativo para coordenar agentes de IA que trabalham em clones indep
 - Presença com recuperação: runners inativos aparecem como desconectados e tarefas em execução ficam bloqueadas para revisão humana.
 - Tarefas com dependências, prioridade, tentativa, resultado e ciclo `READY → CLAIMED → RUNNING → REVIEW → DONE`.
 - Runner automático: busca, reivindica e executa a próxima tarefa compatível.
-- Adaptadores `mock` e `codex`. O adaptador Codex chama o CLI instalado no computador, encaminha os eventos para a sala e mantém o runner ativo durante a execução.
+- Adaptadores `mock`, `codex` e `copilot`. Os adaptadores Codex e GitHub Copilot chamam o CLI instalado no computador, encaminham os eventos para a sala e mantêm o runner ativo durante a execução.
 - Office web inicial que mostra participantes, tarefas e eventos reais da sala.
 
 ## Hub público com Cloudflare
@@ -59,6 +59,25 @@ pnpm cli work -- --state .mireva\runner-codex.json --adapter codex
 ```
 
 O Codex trabalha no diretório em que o comando foi iniciado. Ele não recebe permissões globais nem comandos para ignorar proteções: qualquer aprovação continua sob controle do usuário. Ao concluir, a tarefa vai para `REVIEW`; a decisão de marcar `DONE` permanece humana por enquanto.
+
+## Executar uma tarefa com o GitHub Copilot
+
+Instale e autentique o **GitHub Copilot CLI** no computador que será o runner. A extensão do VS Code não é suficiente para o runner automático.
+
+```powershell
+copilot auth login
+pnpm cli doctor -- --hub https://mireva-hub.renatojosesfc.workers.dev --adapter copilot
+```
+
+Entre na sala e inicie o trabalhador. O primeiro comando processa uma tarefa; o segundo acompanha a fila continuamente:
+
+```powershell
+pnpm cli join 2B7E325E -- --hub https://mireva-hub.renatojosesfc.workers.dev --name "Copilot do Renato" --agent copilot --capabilities CODE,RESEARCH,TEST,GIT --state .mireva\runner-copilot.json
+pnpm cli work -- --state .mireva\runner-copilot.json --adapter copilot --once
+pnpm cli work -- --state .mireva\runner-copilot.json --adapter copilot
+```
+
+O Mireva chama `copilot -p` dentro do diretório em que o comando foi iniciado. O Copilot continua respeitando as confirmações e permissões configuradas no próprio CLI; depois da entrega, a tarefa aparece em `REVIEW` para aprovação humana.
 
 ## Distribuição por capacidade
 

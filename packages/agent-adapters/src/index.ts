@@ -34,3 +34,4 @@ export class MockAgentAdapter implements AgentAdapter {
 }
 
 export { CodexCliAdapter, buildCodexPrompt } from "./codex.js";
+export { CopilotCliAdapter, buildCopilotPrompt } from "./copilot.js";

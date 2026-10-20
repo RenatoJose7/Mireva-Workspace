@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { CodexCliAdapter, MockAgentAdapter, type AgentAdapter } from "@mireva/agent-adapters";
+import { CodexCliAdapter, CopilotCliAdapter, MockAgentAdapter, type AgentAdapter } from "@mireva/agent-adapters";
 import { MirevaRunner, RunnerTaskWorker, joinRunner, type RunnerConfig } from "@mireva/runner";
 
 const args = process.argv.slice(2); const command = args[0];
@@ -14,7 +14,8 @@ const workingDirectory = () => process.env.INIT_CWD ?? process.cwd();
 const createAdapter = (name: string): AgentAdapter => {
   if (name === "mock") return new MockAgentAdapter();
   if (name === "codex") return new CodexCliAdapter();
-  throw new Error(`Adapter não suportado: ${name}. Use mock ou codex.`);
+  if (name === "copilot") return new CopilotCliAdapter();
+  throw new Error(`Adapter não suportado: ${name}. Use mock, codex ou copilot.`);
 };
 
 async function run(): Promise<void> {
@@ -46,5 +47,5 @@ async function run(): Promise<void> {
   if (command === "leave") { await rm(stateFile(), { force: true }); return output({ left: true }); }
   throw new Error(`Unknown command: ${command}`);
 }
-function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex, status, agents, task-create, tasks, task-claim ID, task-update ID, doctor --adapter mock|codex, leave"); }
+function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot, status, agents, task-create, tasks, task-claim ID, task-update ID, doctor --adapter mock|codex|copilot, leave"); }
 run().catch((error: unknown) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

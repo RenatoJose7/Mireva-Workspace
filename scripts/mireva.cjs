@@ -9,6 +9,7 @@ const DEFAULT_HUB = "https://mireva-hub.renatojosesfc.workers.dev";
 const PNPM_VERSION = "11.25.0";
 // MIREVA_RUNTIME_DIR is useful for CI and for keeping an isolated runtime in tests.
 const runtimeDirectory = process.env.MIREVA_RUNTIME_DIR || join(homedir(), ".mireva", "runtime");
+const runtimeStoreDirectory = join(dirname(runtimeDirectory), "store");
 const projectDirectory = process.cwd();
 const rawArgs = process.argv.slice(2);
 // npm exec/npx keeps the argument separator when a package is invoked from Git.
@@ -52,7 +53,7 @@ function syncRuntime(update) {
 }
 function ensureDependencies() {
   if (!existsSync(join(runtimeDirectory, "node_modules", ".pnpm"))) {
-    run("npx", ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtimeDirectory, "install", "--frozen-lockfile"]);
+    run("npx", ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtimeDirectory, "--store-dir", runtimeStoreDirectory, "install", "--frozen-lockfile"]);
   }
 }
 function projectConfigPath() { return join(projectDirectory, ".mireva", "workspace.json"); }

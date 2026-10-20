@@ -100,6 +100,20 @@ pnpm cli orchestrate -- --state .mireva\orchestrator.json --adapter codex
 
 Use `--adapter copilot` se preferir o Copilot como planejador. Depois, escreva o objetivo no Office. O processo `orchestrate` responde com o plano, o Office mostra as tarefas e suas dependências, você aprova e clica em **Distribuir tarefas prontas**. Os runners de Codex/Copilot então executam apenas as tarefas compatíveis com as suas capacidades.
 
+## Trabalhar em outro projeto
+
+O Mireva não cria uma pasta de site por conta própria: você escolhe a pasta do projeto que os agentes devem ler e alterar. Mantenha o Mireva aberto na sua própria pasta e informe o destino com `--project-dir`. Assim, o arquivo de estado continua em `.mireva`, mas o Codex lê o projeto escolhido e o Copilot altera somente esse projeto.
+
+```bash
+mkdir -p ~/Projetos/meu-site
+
+# Na pasta Mireva-Workspace
+pnpm cli orchestrate -- --state .mireva/orchestrator-codex.json --adapter codex --project-dir ~/Projetos/meu-site
+pnpm cli work -- --state .mireva/runner-copilot.json --adapter copilot --project-dir ~/Projetos/meu-site
+```
+
+O próximo formato de distribuição será um pacote NPM para chamar esses comandos sem clonar o repositório do Mireva. Por enquanto, `--project-dir` permite usar o fluxo em qualquer projeto local.
+
 ## Distribuição por capacidade
 
 Cada runner pode declarar capacidades ao entrar na sala. Ao criar uma tarefa, informe as capacidades necessárias e, no Office, use o botão **Distribuir tarefas prontas** do orquestrador. Ele atribui cada tarefa ao agente disponível que atende aos requisitos e tem menos trabalho ativo.

@@ -13,7 +13,7 @@ export const buildCopilotPrompt = (request: AgentExecutionRequest): string => [
 ].filter(Boolean).join("\n\n");
 
 export const buildCopilotPlanningPrompt = (request: AgentPlanningRequest): string => [
-  "Você é o orquestrador de tarefas do Mireva Workspace. Não altere arquivos e não execute comandos: apenas planeje o trabalho.",
+  "Você é o orquestrador de tarefas do Mireva Workspace. Não altere arquivos, não instale dependências e não execute comandos que modifiquem o projeto. Você pode inspecionar arquivos e executar apenas comandos de leitura para entender o repositório antes de planejar.",
   `Pedido do responsável:\n${request.request}`,
   `Estado atual do projeto e dos agentes:\n${request.projectContext}`,
   "Responda SOMENTE com JSON válido, sem Markdown, usando exatamente este formato:",

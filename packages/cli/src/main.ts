@@ -10,7 +10,7 @@ const stateFile = () => resolve(value("--state", ".mireva/runner.json")!);
 const loadState = async () => JSON.parse(await readFile(stateFile(), "utf8")) as RunnerConfig;
 const saveState = async (config: RunnerConfig) => { await mkdir(resolve(stateFile(), ".."), { recursive: true }); await writeFile(stateFile(), JSON.stringify(config, null, 2)); };
 const output = (value: unknown) => console.log(JSON.stringify(value, null, 2));
-const workingDirectory = () => process.env.INIT_CWD ?? process.cwd();
+const projectDirectory = () => resolve(value("--project-dir", process.env.INIT_CWD ?? process.cwd())!);
 const createAdapter = (name: string): AgentAdapter => {
   if (name === "mock") return new MockAgentAdapter();
   if (name === "codex") return new CodexCliAdapter();
@@ -36,7 +36,7 @@ async function run(): Promise<void> {
     const config = await loadState(); const adapter = createAdapter(value("--adapter", "mock")!);
     const detection = await adapter.detect(); if (!detection.installed) throw new Error(detection.reason ?? `Adapter ${adapter.id} não instalado`);
     const authentication = await adapter.checkAuthentication(); if (!authentication.authenticated) throw new Error(authentication.reason ?? `Adapter ${adapter.id} não autenticado`);
-    const worker = new RunnerTaskWorker(new MirevaRunner(config, { onEvent: (event) => output({ event }) }), adapter, workingDirectory());
+    const worker = new RunnerTaskWorker(new MirevaRunner(config, { onEvent: (event) => output({ event }) }), adapter, projectDirectory());
     let running = false;
     const run = async () => { if (running) return; running = true; try { const taskId = await worker.runOnce(); output({ taskId: taskId ?? null, message: taskId ? "Tarefa entregue para revisão" : "Nenhuma tarefa disponível" }); await saveState(config); } finally { running = false; } };
     if (args.includes("--once")) return run(); const timer = setInterval(() => void run().catch((error: unknown) => console.error(error)), Number(value("--interval", "3000"))); process.on("SIGINT", () => { clearInterval(timer); void saveState(config).then(() => process.exit(0)); }); return run();
@@ -47,7 +47,7 @@ async function run(): Promise<void> {
     const authentication = await adapter.checkAuthentication(); if (!authentication.authenticated) throw new Error(authentication.reason ?? `Adapter ${adapter.id} não autenticado`);
     if (!isProjectPlanningAdapter(adapter)) throw new Error(`O adapter ${adapter.id} ainda não cria planos. Use codex ou copilot.`);
     const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) });
-    const worker = new OrchestratorWorker(runner, new MirevaOrchestrator(runner, new AdapterProjectPlanner(adapter, workingDirectory())));
+    const worker = new OrchestratorWorker(runner, new MirevaOrchestrator(runner, new AdapterProjectPlanner(adapter, projectDirectory())));
     let running = false;
     const run = async () => { if (running) return; running = true; try { const result = await worker.runOnce(); output({ ...result, message: result.planId ? "Plano enviado para aprovação" : result.error ? "Falha ao criar plano" : "Nenhum pedido pendente" }); await saveState(config); } finally { running = false; } };
     if (args.includes("--once")) return run(); const timer = setInterval(() => void run().catch((error: unknown) => console.error(error)), Number(value("--interval", "3000"))); process.on("SIGINT", () => { clearInterval(timer); void saveState(config).then(() => process.exit(0)); }); return run();
@@ -58,5 +58,5 @@ async function run(): Promise<void> {
   if (command === "leave") { await rm(stateFile(), { force: true }); return output({ left: true }); }
   throw new Error(`Unknown command: ${command}`);
 }
-function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot, orchestrate --adapter codex|copilot, status, agents, task-create, tasks, task-claim ID, task-update ID, doctor --adapter mock|codex|copilot, leave"); }
+function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot [--project-dir PASTA], orchestrate --adapter codex|copilot [--project-dir PASTA], status, agents, task-create, tasks, task-claim ID, task-update ID, doctor --adapter mock|codex|copilot, leave"); }
 run().catch((error: unknown) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

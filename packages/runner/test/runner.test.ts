@@ -41,10 +41,22 @@ describe("MirevaRunner", () => {
     const planner = { plan: async () => ({ summary: "Separar fundação e interface", tasks: [{ title: "Fundação", description: "Criar base", dependencies: [] }, { title: "Interface", description: "Criar tela", dependencies: [0] }] }) };
     const plan = await new MirevaOrchestrator(runner, planner).planAndPropose("Criar projeto");
     expect(plan.status).toBe("DRAFT");
-    const owner = new MirevaRunner({ hubUrl: hub.url, roomCode: room.room.code, participantId: room.room.ownerId, name: "Owner", agent: "human", lastSequence: 0 });
+    const owner = new MirevaRunner({ hubUrl: hub.url, roomCode: room.room.code, participantId: room.room.ownerId, name: "Owner", agent: "human", capabilities: [], lastSequence: 0 });
     await owner.decidePlan(plan.id, "APPROVED");
     const tasks = (await runner.snapshot()).tasks;
     expect(tasks.map((task) => task.status)).toEqual(["READY", "BACKLOG"]);
     expect(tasks[1]!.dependencies).toEqual([tasks[0]!.id]);
+  });
+  it("dispatches each ready task to an available runner with matching capabilities", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-dispatch-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Dispatch", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
+    const owner = new MirevaRunner({ hubUrl: hub.url, roomCode: room.room.code, participantId: room.room.ownerId, name: "Owner", agent: "human", capabilities: [], lastSequence: 0 });
+    const coder = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Coder", "codex", ["CODE", "TEST"]));
+    const researcher = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Researcher", "gemini", ["RESEARCH"]));
+    const codeTask = await owner.createTask({ title: "Implementar", requiredCapabilities: ["CODE"] });
+    const researchTask = await owner.createTask({ title: "Pesquisar", requiredCapabilities: ["RESEARCH"] });
+    await owner.dispatchTasks();
+    expect((await coder.assignedTasks()).map((task) => task.id)).toEqual([codeTask.id]);
+    expect((await researcher.assignedTasks()).map((task) => task.id)).toEqual([researchTask.id]);
   });
 });

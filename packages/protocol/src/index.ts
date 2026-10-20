@@ -17,7 +17,7 @@ export type Room = z.infer<typeof roomSchema>;
 
 export const participantSchema = z.object({
   id: z.string(), roomId: z.string(), name: z.string(), agent: z.string(), state: agentStateSchema,
-  joinedAt: z.string(), lastSeenAt: z.string(),
+  capabilities: z.array(z.string()).default([]), joinedAt: z.string(), lastSeenAt: z.string(),
 });
 export type Participant = z.infer<typeof participantSchema>;
 
@@ -43,7 +43,7 @@ export const planSchema = z.object({ id: z.string(), roomId: z.string(), request
 export type OrchestrationPlanRecord = z.infer<typeof planSchema>;
 
 export const createRoomSchema = z.object({ name: z.string().min(1).max(100), ownerName: z.string().min(1).max(80) });
-export const joinRoomSchema = z.object({ name: z.string().min(1).max(80), agent: z.string().min(1).max(80) });
+export const joinRoomSchema = z.object({ name: z.string().min(1).max(80), agent: z.string().min(1).max(80), capabilities: z.array(z.string()).default([]) });
 export const postEventSchema = z.object({ kind: eventKindSchema, payload: z.record(z.string(), z.unknown()).default({}) });
 export const createTaskSchema = z.object({
   title: z.string().min(1), description: z.string().default(""), dependencies: z.array(z.string()).default([]),
@@ -56,4 +56,5 @@ export const reviewTaskSchema = z.object({ ownerId: z.string().uuid(), status: z
 
 export const createPlanSchema = z.object({ participantId: z.string().uuid(), request: z.string().min(1).max(20_000), summary: z.string().min(1).max(20_000), tasks: z.array(plannedTaskSchema).min(1).max(30) });
 export const decidePlanSchema = z.object({ ownerId: z.string().uuid(), status: z.enum(["APPROVED", "REJECTED"]) });
+export const dispatchTasksSchema = z.object({ ownerId: z.string().uuid() });
 export interface HubSnapshot { room: Room; participants: Participant[]; tasks: Task[]; plans: OrchestrationPlanRecord[]; lastSequence: number }

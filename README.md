@@ -48,7 +48,7 @@ pnpm cli doctor -- --hub https://mireva-hub.renatojosesfc.workers.dev --adapter 
 Entre na sala usando `codex` como agente (ou reutilize um estado de runner já conectado):
 
 ```powershell
-pnpm cli join 2B7E325E -- --hub https://mireva-hub.renatojosesfc.workers.dev --name "Codex do Renato" --agent codex --state .mireva\runner-codex.json
+pnpm cli join 2B7E325E -- --hub https://mireva-hub.renatojosesfc.workers.dev --name "Codex do Renato" --agent codex --capabilities CODE,RESEARCH,TEST,GIT --state .mireva\runner-codex.json
 ```
 
 O proprietário cria uma tarefa. Depois, no runner com o Codex, execute uma vez para testar ou deixe o processo acompanhando a fila:
@@ -59,6 +59,15 @@ pnpm cli work -- --state .mireva\runner-codex.json --adapter codex
 ```
 
 O Codex trabalha no diretório em que o comando foi iniciado. Ele não recebe permissões globais nem comandos para ignorar proteções: qualquer aprovação continua sob controle do usuário. Ao concluir, a tarefa vai para `REVIEW`; a decisão de marcar `DONE` permanece humana por enquanto.
+
+## Distribuição por capacidade
+
+Cada runner pode declarar capacidades ao entrar na sala. Ao criar uma tarefa, informe as capacidades necessárias e, no Office, use o botão **Distribuir tarefas prontas** do orquestrador. Ele atribui cada tarefa ao agente disponível que atende aos requisitos e tem menos trabalho ativo.
+
+```powershell
+pnpm cli task-create -- --state .mireva\runner-a.json --title "Implementar checkout" --capabilities CODE,TEST
+pnpm cli join 2B7E325E -- --hub https://mireva-hub.renatojosesfc.workers.dev --name "Pesquisador" --agent gemini --capabilities RESEARCH --state .mireva\runner-research.json
+```
 
 ## Demonstração com dois Runners
 

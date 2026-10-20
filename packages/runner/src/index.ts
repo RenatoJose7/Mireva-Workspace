@@ -1,7 +1,7 @@
 import type { AgentAdapter, AgentExecutionRequest } from "@mireva/agent-adapters";
 import type { AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, RoomEvent, Task } from "@mireva/protocol";
 
-export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; lastSequence: number }
+export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; capabilities: string[]; lastSequence: number }
 export interface RunnerCallbacks { onEvent?(event: RoomEvent): void; onError?(error: Error): void }
 
 export class MirevaRunner {
@@ -17,10 +17,12 @@ export class MirevaRunner {
     await this.request(`/rooms/${this.config.roomCode}/presence`, { method: "POST", body: { participantId: this.config.participantId, state } });
   }
   async heartbeat(): Promise<void> { await this.setPresence(this.state); }
-  async createTask(input: { title: string; description?: string; dependencies?: string[]; priority?: number; acceptanceCriteria?: string[] }): Promise<Task> {
+  async createTask(input: { title: string; description?: string; dependencies?: string[]; priority?: number; requiredCapabilities?: string[]; acceptanceCriteria?: string[] }): Promise<Task> {
     return this.request(`/rooms/${this.config.roomCode}/tasks`, { method: "POST", body: input }) as Promise<Task>;
   }
   async availableTasks(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/tasks/available`) as Promise<Task[]>; }
+  async assignedTasks(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/tasks/assigned?participantId=${this.config.participantId}`) as Promise<Task[]>; }
+  async dispatchTasks(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/tasks/dispatch`, { method: "POST", body: { ownerId: this.config.participantId } }) as Promise<Task[]>; }
   async snapshot(): Promise<HubSnapshot> { return this.request(`/rooms/${this.config.roomCode}`) as Promise<HubSnapshot>; }
   async createPlan(input: { request: string; summary: string; tasks: OrchestrationPlanRecord["tasks"] }): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans`, { method: "POST", body: { participantId: this.config.participantId, ...input } }) as Promise<OrchestrationPlanRecord>; }
   async decidePlan(planId: string, status: "APPROVED" | "REJECTED"): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans/${planId}/decision`, { method: "POST", body: { ownerId: this.config.participantId, status } }) as Promise<OrchestrationPlanRecord>; }
@@ -44,11 +46,11 @@ export class MirevaRunner {
   }
 }
 
-export async function joinRunner(hubUrl: string, roomCode: string, name: string, agent: string): Promise<RunnerConfig> {
-  const response = await fetch(`${hubUrl}/rooms/${roomCode}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, agent }) });
+export async function joinRunner(hubUrl: string, roomCode: string, name: string, agent: string, capabilities: string[] = []): Promise<RunnerConfig> {
+  const response = await fetch(`${hubUrl}/rooms/${roomCode}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, agent, capabilities }) });
   if (!response.ok) throw new Error(`Could not join room: ${await response.text()}`);
   const participant = await response.json() as Participant;
-  return { hubUrl, roomCode, participantId: participant.id, name, agent, lastSequence: 0 };
+  return { hubUrl, roomCode, participantId: participant.id, name, agent, capabilities, lastSequence: 0 };
 }
 
 export class AgentTaskExecutor {
@@ -73,7 +75,10 @@ export class AgentTaskExecutor {
 export class RunnerTaskWorker {
   constructor(private readonly runner: MirevaRunner, private readonly adapter: AgentAdapter, private readonly workingDirectory: string) {}
   async runOnce(context: string[] = []): Promise<string | undefined> {
-    const tasks = await this.runner.availableTasks();
+    const assigned = await this.runner.assignedTasks();
+    for (const task of assigned) { await new AgentTaskExecutor(this.runner, this.adapter).execute(task, this.workingDirectory, context); return task.id; }
+    const capabilities = this.runner.config.capabilities ?? [];
+    const tasks = (await this.runner.availableTasks()).filter((task) => task.requiredCapabilities.every((capability) => capabilities.includes(capability)));
     for (const task of tasks) {
       try { const claimed = await this.runner.claimTask(task.id); await new AgentTaskExecutor(this.runner, this.adapter).execute(claimed, this.workingDirectory, context); return task.id; }
       catch (error: unknown) { if (!(error instanceof Error) || !error.message.includes("409")) throw error; }

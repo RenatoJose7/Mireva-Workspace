@@ -36,9 +36,11 @@ async function run(): Promise<void> {
     const config = await loadState(); const adapter = createAdapter(value("--adapter", "mock")!);
     const detection = await adapter.detect(); if (!detection.installed) throw new Error(detection.reason ?? `Adapter ${adapter.id} não instalado`);
     const authentication = await adapter.checkAuthentication(); if (!authentication.authenticated) throw new Error(authentication.reason ?? `Adapter ${adapter.id} não autenticado`);
-    const worker = new RunnerTaskWorker(new MirevaRunner(config, { onEvent: (event) => output({ event }) }), adapter, projectDirectory());
+    const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) });
+    await runner.setPresence("AVAILABLE");
+    const worker = new RunnerTaskWorker(runner, adapter, projectDirectory());
     let running = false;
-    const run = async () => { if (running) return; running = true; try { const taskId = await worker.runOnce(); output({ taskId: taskId ?? null, message: taskId ? "Tarefa entregue para revisão" : "Nenhuma tarefa disponível" }); await saveState(config); } finally { running = false; } };
+    const run = async () => { if (running) return; running = true; try { await runner.heartbeat(); const taskId = await worker.runOnce(); output({ taskId: taskId ?? null, message: taskId ? "Tarefa entregue para revisão" : "Nenhuma tarefa disponível" }); await saveState(config); } finally { running = false; } };
     if (args.includes("--once")) return run(); const timer = setInterval(() => void run().catch((error: unknown) => console.error(error)), Number(value("--interval", "3000"))); process.on("SIGINT", () => { clearInterval(timer); void saveState(config).then(() => process.exit(0)); }); return run();
   }
   if (command === "orchestrate") {
@@ -47,9 +49,10 @@ async function run(): Promise<void> {
     const authentication = await adapter.checkAuthentication(); if (!authentication.authenticated) throw new Error(authentication.reason ?? `Adapter ${adapter.id} não autenticado`);
     if (!isProjectPlanningAdapter(adapter)) throw new Error(`O adapter ${adapter.id} ainda não cria planos. Use codex ou copilot.`);
     const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) });
+    await runner.setPresence("AVAILABLE");
     const worker = new OrchestratorWorker(runner, new MirevaOrchestrator(runner, new AdapterProjectPlanner(adapter, projectDirectory())));
     let running = false;
-    const run = async () => { if (running) return; running = true; try { const result = await worker.runOnce(); output({ ...result, message: result.planId ? "Plano enviado para aprovação" : result.error ? "Falha ao criar plano" : "Nenhum pedido pendente" }); await saveState(config); } finally { running = false; } };
+    const run = async () => { if (running) return; running = true; try { await runner.heartbeat(); const result = await worker.runOnce(); output({ ...result, message: result.planId ? "Plano enviado para aprovação" : result.error ? "Falha ao criar plano" : "Nenhum pedido pendente" }); await saveState(config); } finally { running = false; } };
     if (args.includes("--once")) return run(); const timer = setInterval(() => void run().catch((error: unknown) => console.error(error)), Number(value("--interval", "3000"))); process.on("SIGINT", () => { clearInterval(timer); void saveState(config).then(() => process.exit(0)); }); return run();
   }
   if (command === "status") { const config = await loadState(); const response = await fetch(`${config.hubUrl}/rooms/${config.roomCode}`); if (!response.ok) throw new Error(await response.text()); return output(await response.json()); }

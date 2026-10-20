@@ -37,7 +37,7 @@ export const taskSchema = z.object({
 });
 export type Task = z.infer<typeof taskSchema>;
 
-export const plannedTaskSchema = z.object({ title: z.string().min(1), description: z.string().default(""), dependencies: z.array(z.number().int().nonnegative()).default([]), priority: z.number().int().min(0).max(100).default(50), acceptanceCriteria: z.array(z.string()).default([]) });
+export const plannedTaskSchema = z.object({ title: z.string().min(1), description: z.string().default(""), dependencies: z.array(z.number().int().nonnegative()).default([]), priority: z.number().int().min(0).max(100).default(50), requiredCapabilities: z.array(z.string()).default([]), acceptanceCriteria: z.array(z.string()).default([]) });
 export const planStatusSchema = z.enum(["DRAFT", "APPROVED", "REJECTED"]);
 export const planSchema = z.object({ id: z.string(), roomId: z.string(), request: z.string(), summary: z.string(), status: planStatusSchema, tasks: z.array(plannedTaskSchema), generatedTaskIds: z.array(z.string()), createdAt: z.string(), updatedAt: z.string() });
 export type OrchestrationPlanRecord = z.infer<typeof planSchema>;

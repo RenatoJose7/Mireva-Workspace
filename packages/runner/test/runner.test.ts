@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLocalHub, type LocalHub } from "../../../apps/hub/src/server.js";
-import { joinRunner, MirevaOrchestrator, MirevaRunner } from "../src/index.js";
+import { joinRunner, MirevaOrchestrator, MirevaRunner, OrchestratorWorker } from "../src/index.js";
 import { AgentTaskExecutor, RunnerTaskWorker } from "../src/index.js";
 import { MockAgentAdapter } from "@mireva/agent-adapters";
 
@@ -46,6 +46,23 @@ describe("MirevaRunner", () => {
     const tasks = (await runner.snapshot()).tasks;
     expect(tasks.map((task) => task.status)).toEqual(["READY", "BACKLOG"]);
     expect(tasks[1]!.dependencies).toEqual([tasks[0]!.id]);
+    expect(tasks[0]!.requiredCapabilities).toEqual([]);
+  });
+  it("turns an Office request into one reviewable plan only", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-orchestrator-worker-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Pedidos", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
+    const owner = new MirevaRunner({ hubUrl: hub.url, roomCode: room.room.code, participantId: room.room.ownerId, name: "Owner", agent: "human", capabilities: [], lastSequence: 0 });
+    const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Orchestrator", "copilot"));
+    await owner.publish("ORCHESTRATOR_REQUEST", { message: "Criar site" });
+    const planner = { plan: async () => ({ summary: "Uma base", tasks: [{ title: "Base", description: "Criar", dependencies: [], requiredCapabilities: ["CODE"] }] }) };
+    const worker = new OrchestratorWorker(runner, new MirevaOrchestrator(runner, planner));
+    expect((await worker.runOnce()).planId).toBeTruthy();
+    expect(await worker.runOnce()).toEqual({});
+    const snapshot = await runner.snapshot();
+    expect(snapshot.plans).toHaveLength(1);
+    expect(snapshot.plans[0]?.tasks[0]?.requiredCapabilities).toEqual(["CODE"]);
+    await owner.decidePlan(snapshot.plans[0]!.id, "APPROVED");
+    expect((await runner.snapshot()).tasks[0]?.requiredCapabilities).toEqual(["CODE"]);
   });
   it("dispatches each ready task to an available runner with matching capabilities", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-dispatch-")), "hub.json") });

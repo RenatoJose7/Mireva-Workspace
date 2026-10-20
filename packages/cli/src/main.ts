@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { CodexCliAdapter, CopilotCliAdapter, MockAgentAdapter, type AgentAdapter } from "@mireva/agent-adapters";
-import { MirevaRunner, RunnerTaskWorker, joinRunner, type RunnerConfig } from "@mireva/runner";
+import { CodexCliAdapter, CopilotCliAdapter, MockAgentAdapter, isProjectPlanningAdapter, type AgentAdapter } from "@mireva/agent-adapters";
+import { AdapterProjectPlanner, MirevaOrchestrator, MirevaRunner, OrchestratorWorker, RunnerTaskWorker, joinRunner, type RunnerConfig } from "@mireva/runner";
 
 const args = process.argv.slice(2); const command = args[0];
 const value = (flag: string, fallback?: string): string | undefined => { const index = args.indexOf(flag); return index < 0 ? fallback : args[index + 1]; };
@@ -41,11 +41,22 @@ async function run(): Promise<void> {
     const run = async () => { if (running) return; running = true; try { const taskId = await worker.runOnce(); output({ taskId: taskId ?? null, message: taskId ? "Tarefa entregue para revisão" : "Nenhuma tarefa disponível" }); await saveState(config); } finally { running = false; } };
     if (args.includes("--once")) return run(); const timer = setInterval(() => void run().catch((error: unknown) => console.error(error)), Number(value("--interval", "3000"))); process.on("SIGINT", () => { clearInterval(timer); void saveState(config).then(() => process.exit(0)); }); return run();
   }
+  if (command === "orchestrate") {
+    const config = await loadState(); const adapter = createAdapter(value("--adapter", "copilot")!);
+    const detection = await adapter.detect(); if (!detection.installed) throw new Error(detection.reason ?? `Adapter ${adapter.id} não instalado`);
+    const authentication = await adapter.checkAuthentication(); if (!authentication.authenticated) throw new Error(authentication.reason ?? `Adapter ${adapter.id} não autenticado`);
+    if (!isProjectPlanningAdapter(adapter)) throw new Error(`O adapter ${adapter.id} ainda não cria planos. Use copilot.`);
+    const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) });
+    const worker = new OrchestratorWorker(runner, new MirevaOrchestrator(runner, new AdapterProjectPlanner(adapter, workingDirectory())));
+    let running = false;
+    const run = async () => { if (running) return; running = true; try { const result = await worker.runOnce(); output({ ...result, message: result.planId ? "Plano enviado para aprovação" : result.error ? "Falha ao criar plano" : "Nenhum pedido pendente" }); await saveState(config); } finally { running = false; } };
+    if (args.includes("--once")) return run(); const timer = setInterval(() => void run().catch((error: unknown) => console.error(error)), Number(value("--interval", "3000"))); process.on("SIGINT", () => { clearInterval(timer); void saveState(config).then(() => process.exit(0)); }); return run();
+  }
   if (command === "status") { const config = await loadState(); const response = await fetch(`${config.hubUrl}/rooms/${config.roomCode}`); if (!response.ok) throw new Error(await response.text()); return output(await response.json()); }
   if (command === "agents") { const config = await loadState(); const room = await fetch(`${config.hubUrl}/rooms/${config.roomCode}`).then((r) => r.json()) as { participants: unknown[] }; return output(room.participants); }
   if (command === "doctor") { const hub = value("--hub", "http://127.0.0.1:8787")!; const response = await fetch(`${hub}/health`).catch(() => undefined); const adapter = createAdapter(value("--adapter", "mock")!); return output({ node: process.version, hub, hubReachable: response?.ok ?? false, adapter: { id: adapter.id, detection: await adapter.detect(), authentication: await adapter.checkAuthentication() } }); }
   if (command === "leave") { await rm(stateFile(), { force: true }); return output({ left: true }); }
   throw new Error(`Unknown command: ${command}`);
 }
-function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot, status, agents, task-create, tasks, task-claim ID, task-update ID, doctor --adapter mock|codex|copilot, leave"); }
+function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot, orchestrate --adapter copilot, status, agents, task-create, tasks, task-claim ID, task-update ID, doctor --adapter mock|codex|copilot, leave"); }
 run().catch((error: unknown) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

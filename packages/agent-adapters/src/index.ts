@@ -4,6 +4,10 @@ export interface AdapterAuthentication { authenticated: boolean; reason?: string
 export interface AgentExecutionRequest { taskId: string; title: string; instructions: string; workingDirectory: string; context: string[] }
 export type AgentExecutionEvent = { type: "STARTED" | "PROGRESS" | "LOG" | "COMPLETED" | "FAILED" | "CANCELLED"; message: string; at: string };
 export interface AgentExecutionResult { taskId: string; status: "COMPLETED" | "FAILED" | "CANCELLED"; summary: string; files: string[]; branch?: string; startedAt: string; completedAt: string }
+export interface AgentPlanTask { title: string; description: string; dependencies: number[]; priority: number; requiredCapabilities: string[]; acceptanceCriteria: string[] }
+export interface AgentPlan { summary: string; tasks: AgentPlanTask[] }
+export interface AgentPlanningRequest { request: string; workingDirectory: string; projectContext: string }
+export interface ProjectPlanningAdapter { planProject(request: AgentPlanningRequest): Promise<AgentPlan> }
 
 export interface AgentAdapter {
   readonly id: string;
@@ -15,6 +19,7 @@ export interface AgentAdapter {
   cancelTask(taskId: string): Promise<void>;
   getResult(taskId: string): Promise<AgentExecutionResult | undefined>;
 }
+export const isProjectPlanningAdapter = (adapter: AgentAdapter): adapter is AgentAdapter & ProjectPlanningAdapter => "planProject" in adapter && typeof (adapter as Partial<ProjectPlanningAdapter>).planProject === "function";
 
 interface MockExecution { events: AgentExecutionEvent[]; result?: AgentExecutionResult; cancelled: boolean }
 export class MockAgentAdapter implements AgentAdapter {
@@ -34,4 +39,4 @@ export class MockAgentAdapter implements AgentAdapter {
 }
 
 export { CodexCliAdapter, buildCodexPrompt } from "./codex.js";
-export { CopilotCliAdapter, buildCopilotPrompt } from "./copilot.js";
+export { CopilotCliAdapter, buildCopilotPlanningPrompt, buildCopilotPrompt, parseCopilotPlan } from "./copilot.js";

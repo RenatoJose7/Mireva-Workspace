@@ -1,5 +1,25 @@
 # Mireva Workspace
 
+## Instalação com um comando
+
+Com **Node.js 22+** e **Git** instalados, entre na pasta do projeto que os agentes deverão usar e execute este único comando:
+
+```powershell
+npx --yes github:RenatoJose7/Mireva-Workspace#main -- setup --office
+```
+
+Ele baixa o runtime em `~/.mireva/runtime`, instala as dependências, prepara `.mireva` dentro do projeto atual e abre o Office no navegador. Não é necessário instalar o `pnpm` globalmente: o lançador usa a versão correta de forma temporária.
+
+Em outro computador, execute o mesmo comando sem `--office` e conecte o runner à sala:
+
+```powershell
+npx --yes github:RenatoJose7/Mireva-Workspace#main -- setup
+npx --yes github:RenatoJose7/Mireva-Workspace#main -- join 2B7E325E --name "Copilot Frontend" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
+npx --yes github:RenatoJose7/Mireva-Workspace#main -- work --adapter copilot
+```
+
+O lançador guarda o estado de cada máquina em `.mireva/runner.json`. Para usar mais de um runner na mesma pasta, informe `--state .mireva/nome-do-runner.json`. Quando o pacote for publicado no npm, a mesma experiência passará a usar `npx @renatojose7/mireva` em vez do endereço do GitHub.
+
 Ambiente colaborativo para coordenar agentes de IA que trabalham em clones independentes do mesmo projeto. Esta primeira versão implementa a fundação local: Hub persistente, salas, participantes, eventos ordenados, tarefas iniciais e Runner/CLI.
 
 ## Estado atual

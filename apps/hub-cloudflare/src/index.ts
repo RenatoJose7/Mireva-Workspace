@@ -1,7 +1,7 @@
-import { claimTaskSchema, configureParticipantSchema, createPlanSchema, createRoomSchema, createTaskSchema, decidePlanSchema, dispatchTasksSchema, joinRoomSchema, postEventSchema, reportUsageSchema, reviewTaskSchema, updateTaskSchema, type AgentState, type OrchestrationPlanRecord, type Participant, type RoomEvent, type Task } from "@mireva/protocol";
+import { claimTaskSchema, configureParticipantSchema, createPlanSchema, createRoomSchema, createTaskSchema, decidePlanSchema, dispatchTasksSchema, joinRoomSchema, postEventSchema, reportUsageSchema, reviewTaskSchema, updateProjectMemorySchema, updateTaskSchema, type AgentState, type OrchestrationPlanRecord, type Participant, type RoomEvent, type Task } from "@mireva/protocol";
 
 export interface Env { ROOM: DurableObjectNamespace }
-interface RoomState { id: string; code: string; name: string; ownerId: string; createdAt: string; participants: Participant[]; tasks: Task[]; plans: OrchestrationPlanRecord[]; events: RoomEvent[]; lastSequence: number }
+interface RoomState { id: string; code: string; name: string; ownerId: string; createdAt: string; participants: Participant[]; tasks: Task[]; plans: OrchestrationPlanRecord[]; projectMemory: string; events: RoomEvent[]; lastSequence: number }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json", "access-control-allow-origin": "*" } });
 const now = () => new Date().toISOString();
 
@@ -14,11 +14,12 @@ export class Room implements DurableObject {
       if (request.method === "POST" && path === "/create") {
         if (room) return json({ error: "Room already exists" }, 409);
         const input = createRoomSchema.parse(await request.json()); const time = now(); const ownerId = crypto.randomUUID();
-        room = { id: crypto.randomUUID(), code: new URL(request.url).searchParams.get("code")!, name: input.name, ownerId, createdAt: time, participants: [{ id: ownerId, roomId: "", name: input.ownerName, agent: "human", state: "AVAILABLE", role: "GENERAL", capabilities: [], usage: null, joinedAt: time, lastSeenAt: time }], tasks: [], plans: [], events: [], lastSequence: 0 }; room.participants[0]!.roomId = room.id; await this.save(room); return json({ room: { id: room.id, code: room.code, name: room.name, ownerId: room.ownerId, createdAt: room.createdAt }, owner: room.participants[0] }, 201);
+        room = { id: crypto.randomUUID(), code: new URL(request.url).searchParams.get("code")!, name: input.name, ownerId, createdAt: time, participants: [{ id: ownerId, roomId: "", name: input.ownerName, agent: "human", state: "AVAILABLE", role: "GENERAL", capabilities: [], usage: null, joinedAt: time, lastSeenAt: time }], tasks: [], plans: [], projectMemory: "", events: [], lastSequence: 0 }; room.participants[0]!.roomId = room.id; await this.save(room); return json({ room: { id: room.id, code: room.code, name: room.name, ownerId: room.ownerId, createdAt: room.createdAt }, owner: room.participants[0] }, 201);
       }
       if (!room) return json({ error: "Room not found" }, 404);
       if (!Array.isArray(room.tasks)) room.tasks = [];
       if (!Array.isArray(room.plans)) room.plans = [];
+      room.projectMemory ??= "";
       if (!Array.isArray(room.events)) room.events = [];
       if (!Array.isArray(room.participants)) room.participants = [];
       for (const participant of room.participants) { participant.role ??= "GENERAL"; participant.capabilities ??= []; participant.usage ??= null; }
@@ -30,6 +31,7 @@ export class Room implements DurableObject {
       const participantUsage = path.match(/^\/participants\/([^/]+)\/usage$/);
       if (request.method === "POST" && participantUsage) { const input = reportUsageSchema.parse(await request.json()); const participant = room.participants.find((entry) => entry.id === participantUsage[1]); if (!participant) return json({ error: "Participant not found" }, 404); if (input.reporterId !== participant.id && input.reporterId !== room.ownerId) return json({ error: "Only the runner or room owner can report usage" }, 403); participant.usage = { used: input.used, limit: input.limit, unit: input.unit, resetAt: input.resetAt, reportedAt: now() }; this.event(room, "USAGE_REPORTED", input.reporterId, { participantId: participant.id, usage: participant.usage }); await this.save(room); return json(participant); }
       if (request.method === "GET" && path === "/events") return json(room.events.filter((e) => e.sequence > Number(new URL(request.url).searchParams.get("after") ?? 0)));
+      if (request.method === "POST" && path === "/memory") { const input = updateProjectMemorySchema.parse(await request.json()); if (input.ownerId !== room.ownerId) return json({ error: "Only the room owner can update project memory" }, 403); room.projectMemory = input.content; this.event(room, "PROJECT_MEMORY_UPDATED", input.ownerId, { length: input.content.length }); await this.save(room); return json({ content: room.projectMemory }); }
       if (request.method === "POST" && path === "/events") { const body = await request.json() as { participantId: string }; const input = postEventSchema.parse(body); if (!room.participants.some((p) => p.id === body.participantId)) return json({ error: "Participant not found" }, 404); const event = this.event(room, input.kind, body.participantId, input.payload); await this.save(room); return json(event, 201); }
       if (request.method === "POST" && path === "/presence") { const body = await request.json() as { participantId: string; state: AgentState }; const participant = room.participants.find((p) => p.id === body.participantId); if (!participant) return json({ error: "Participant not found" }, 404); participant.state = body.state; participant.lastSeenAt = now(); this.event(room, "PRESENCE", participant.id, { state: body.state }); await this.save(room); return new Response(null, { status: 204 }); }
       if (request.method === "POST" && path === "/plans") { const input = createPlanSchema.parse(await request.json()); if (!room.participants.some((participant) => participant.id === input.participantId)) return json({ error: "Participant not found" }, 404); const timestamp = now(); const plan: OrchestrationPlanRecord = { id: crypto.randomUUID(), roomId: room.id, request: input.request, summary: input.summary, status: "DRAFT", tasks: input.tasks, generatedTaskIds: [], createdAt: timestamp, updatedAt: timestamp }; room.plans.push(plan); this.event(room, "PLAN_CREATED", input.participantId, { plan }); await this.save(room); return json(plan, 201); }
@@ -47,7 +49,7 @@ export class Room implements DurableObject {
     } catch (error) { return json({ error: error instanceof Error ? error.message : "Bad request" }, 400); }
   }
   private event(room: RoomState, kind: RoomEvent["kind"], participantId: string | null, payload: Record<string, unknown>): RoomEvent { if (!Array.isArray(room.events)) room.events = []; const event: RoomEvent = { id: crypto.randomUUID(), roomId: room.id, sequence: ++room.lastSequence, kind, participantId, payload, createdAt: now() }; room.events.push(event); return event; }
-  private snapshot(room: RoomState) { return { room: { id: room.id, code: room.code, name: room.name, ownerId: room.ownerId, createdAt: room.createdAt }, participants: room.participants, tasks: room.tasks, plans: room.plans, lastSequence: room.lastSequence }; }
+  private snapshot(room: RoomState) { return { room: { id: room.id, code: room.code, name: room.name, ownerId: room.ownerId, createdAt: room.createdAt }, participants: room.participants, tasks: room.tasks, plans: room.plans, projectMemory: room.projectMemory ?? "", lastSequence: room.lastSequence }; }
   private save(room: RoomState) { return this.state.storage.put("room", room); }
   private async refreshPresence(room: RoomState): Promise<void> {
     const cutoff = Date.now() - 20_000; let changed = false;

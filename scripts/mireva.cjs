@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 const { existsSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
-const { homedir } = require("node:os");
+const { homedir, networkInterfaces } = require("node:os");
 const { dirname, join, resolve } = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
+const { agentConfig } = require("./mireva-agent.cjs");
 
 const REPOSITORY = "https://github.com/RenatoJose7/Mireva-Workspace.git";
 const DEFAULT_HUB = "https://mireva-hub.renatojosesfc.workers.dev";
@@ -31,6 +33,7 @@ Mireva Workspace launcher
 Uso:
   npx --yes github:RenatoJose7/Mireva-Workspace#main -- setup
   npx --yes github:RenatoJose7/Mireva-Workspace#main -- office
+  npx --yes github:RenatoJose7/Mireva-Workspace#main -- agent
   npx --yes github:RenatoJose7/Mireva-Workspace#main -- connect CODIGO --name "Copilot" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
   npx --yes github:RenatoJose7/Mireva-Workspace#main -- join CODIGO --name "Copilot" --agent copilot
   npx --yes github:RenatoJose7/Mireva-Workspace#main -- work --adapter copilot
@@ -58,6 +61,15 @@ function ensureDependencies() {
     run("npx", ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtimeDirectory, "--store-dir", runtimeStoreDirectory, "install", "--frozen-lockfile"]);
   }
 }
+function officeEnvironment() {
+  const config = agentConfig();
+  const script = join(__dirname, "mireva-agent.cjs");
+  const child = spawn(process.execPath, [script], { detached: true, stdio: "ignore", env: { ...process.env, MIREVA_RUNTIME_DIR: runtimeDirectory } });
+  child.unref();
+  const localNetwork = Object.values(networkInterfaces()).flat().find((network) => network && network.family === "IPv4" && !network.internal)?.address;
+  return { ...process.env, VITE_MIREVA_AGENT_URL: `http://127.0.0.1:${config.port}`, VITE_MIREVA_AGENT_TOKEN: config.token, VITE_MIREVA_PROJECT_DIR: projectDirectory, VITE_MIREVA_INVITE_BASE_URL: localNetwork ? `http://${localNetwork}:5173` : "" };
+}
+function openOffice() { run("npx", ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtimeDirectory, "--filter", "@mireva/office", "dev", "--", "--open", "--host", "0.0.0.0"], { env: officeEnvironment() }); }
 function projectConfigPath() { return join(projectDirectory, ".mireva", "workspace.json"); }
 function writeProjectConfig() {
   mkdirSync(join(projectDirectory, ".mireva"), { recursive: true });
@@ -110,23 +122,25 @@ if (command === "setup") {
   writeProjectConfig();
   console.log(`\nMireva pronto nesta pasta. Runtime: ${runtimeDirectory}`);
   console.log("Próximo passo: execute `npx --yes github:RenatoJose7/Mireva-Workspace#main -- office` para abrir o escritório.");
-  if (rawArgs.includes("--office")) run("npx", ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtimeDirectory, "--filter", "@mireva/office", "dev", "--", "--open"]);
+  if (rawArgs.includes("--office")) openOffice();
   process.exit(0);
 }
 if (command === "office") {
-  run("npx", ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtimeDirectory, "--filter", "@mireva/office", "dev", "--", "--open"]);
+  openOffice();
   process.exit(0);
 }
-if (command === "hub:deploy") {
+if (command === "agent") {
+  require("./mireva-agent.cjs").startAgentServer({ runtimeDirectory });
+} else if (command === "hub:deploy") {
   run("npx", ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtimeDirectory, "hub:deploy"]);
   process.exit(0);
-}
-if (command === "config") {
+} else if (command === "config") {
   if (!existsSync(projectConfigPath())) fail("execute `mireva setup` nesta pasta primeiro");
   console.log(readFileSync(projectConfigPath(), "utf8"));
   process.exit(0);
+} else if (command === "connect") { runConnect(rawArgs); process.exit(0); }
+else {
+  const cliCommands = new Set(["init", "login", "create", "join", "start", "work", "orchestrate", "status", "agents", "task-create", "tasks", "task-claim", "task-update", "limit-report", "doctor", "leave"]);
+  if (!cliCommands.has(command)) { help(); fail(`comando desconhecido: ${command}`); }
+  runCli(command, rawArgs);
 }
-if (command === "connect") { runConnect(rawArgs); process.exit(0); }
-const cliCommands = new Set(["init", "login", "create", "join", "start", "work", "orchestrate", "status", "agents", "task-create", "tasks", "task-claim", "task-update", "limit-report", "doctor", "leave"]);
-if (!cliCommands.has(command)) { help(); fail(`comando desconhecido: ${command}`); }
-runCli(command, rawArgs);

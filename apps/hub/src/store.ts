@@ -21,7 +21,7 @@ export class LocalHubStore {
     const id = randomUUID(); const ownerId = randomUUID(); const createdAt = now();
     const room: Room = { id, code: roomCode(), name, ownerId, createdAt };
     const owner: Participant = { id: ownerId, roomId: id, name: ownerName, agent: "human", state: "AVAILABLE", role: "GENERAL", capabilities: [], usage: null, joinedAt: createdAt, lastSeenAt: createdAt };
-    this.data.rooms[room.code] = { room, participants: [owner], tasks: [], plans: [], events: [], lastSequence: 0 };
+    this.data.rooms[room.code] = { room, participants: [owner], tasks: [], plans: [], projectMemory: "", events: [], lastSequence: 0 };
     await this.save(); return { room, owner };
   }
   async snapshot(code: string): Promise<HubSnapshot | undefined> {
@@ -29,6 +29,7 @@ export class LocalHubStore {
     await this.refreshPresence(found);
     found.tasks ??= [];
     found.plans ??= [];
+    found.projectMemory ??= "";
     found.events ??= [];
     const { events: _events, ...snapshot } = found; return structuredClone(snapshot);
   }
@@ -60,6 +61,10 @@ export class LocalHubStore {
   async event(code: string, participantId: string, kind: RoomEvent["kind"], payload: Record<string, unknown>): Promise<RoomEvent | undefined> {
     const found = this.data.rooms[code]; if (!found || !found.participants.some((p) => p.id === participantId)) return undefined;
     const event = await this.append(found, kind, participantId, payload); await this.save(); return structuredClone(event);
+  }
+  async updateProjectMemory(code: string, ownerId: string, content: string): Promise<string | undefined> {
+    const found = this.data.rooms[code]; if (!found || found.room.ownerId !== ownerId) return undefined;
+    found.projectMemory = content; await this.append(found, "PROJECT_MEMORY_UPDATED", ownerId, { length: content.length }); await this.save(); return content;
   }
   async events(code: string, after: number): Promise<RoomEvent[] | undefined> { const room = this.data.rooms[code]; if (!room) return undefined; await this.refreshPresence(room); return structuredClone(room.events.filter((event) => event.sequence > after)); }
   async createTask(code: string, input: Omit<Task, "id" | "roomId" | "status" | "createdAt" | "updatedAt" | "assignedParticipantId" | "result" | "attempts">): Promise<Task | undefined> {
@@ -126,6 +131,7 @@ export class LocalHubStore {
   }
   private async refreshPresence(room: StoredRoom): Promise<void> {
     const cutoff = Date.now() - 20_000; let changed = false;
+    room.projectMemory ??= "";
     for (const participant of room.participants) { participant.role ??= "GENERAL"; participant.capabilities ??= []; participant.usage ??= null; if (participant.state !== "DISCONNECTED" && Date.parse(participant.lastSeenAt) < cutoff) { participant.state = "DISCONNECTED"; await this.append(room, "PRESENCE", participant.id, { state: "DISCONNECTED" }); changed = true; } }
     for (const task of room.tasks) if (task.assignedParticipantId && ["CLAIMED", "RUNNING", "REVIEW"].includes(task.status) && room.participants.some((participant) => participant.id === task.assignedParticipantId && participant.state === "DISCONNECTED")) { task.status = "BLOCKED"; task.updatedAt = now(); await this.append(room, "TASK_UPDATED", null, { task, reason: "ASSIGNEE_DISCONNECTED" }); changed = true; }
     if (changed) await this.save();

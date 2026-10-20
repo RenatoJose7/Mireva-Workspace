@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "bin": { "mireva": "./scripts/mireva.cjs" },
-  "files": ["scripts/mireva.cjs", "README.md"],
+  "files": ["scripts/mireva.cjs", "scripts/mireva-agent.cjs", "README.md"],
   "packageManager": "pnpm@11.25.0",
   "engines": { "node": ">=22" },
   "scripts": {

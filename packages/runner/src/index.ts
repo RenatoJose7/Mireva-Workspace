@@ -79,13 +79,15 @@ export class AgentTaskExecutor {
 export class RunnerTaskWorker {
   constructor(private readonly runner: MirevaRunner, private readonly adapter: AgentAdapter, private readonly workingDirectory: string) {}
   async runOnce(context: string[] = []): Promise<string | undefined> {
+    const memory = (await this.runner.snapshot()).projectMemory?.trim();
+    const sharedContext = memory ? [...context, `Memória do projeto (siga estas decisões):\n${memory}`] : context;
     const assigned = await this.runner.assignedTasks();
-    for (const task of assigned) { await new AgentTaskExecutor(this.runner, this.adapter).execute(task, this.workingDirectory, context); return task.id; }
+    for (const task of assigned) { await new AgentTaskExecutor(this.runner, this.adapter).execute(task, this.workingDirectory, sharedContext); return task.id; }
     const participant = (await this.runner.snapshot()).participants.find((entry) => entry.id === this.runner.config.participantId);
     const capabilities = participant?.capabilities ?? this.runner.config.capabilities ?? [];
     const tasks = (await this.runner.availableTasks()).filter((task) => task.requiredCapabilities.every((capability) => capabilities.includes(capability)));
     for (const task of tasks) {
-      try { const claimed = await this.runner.claimTask(task.id); await new AgentTaskExecutor(this.runner, this.adapter).execute(claimed, this.workingDirectory, context); return task.id; }
+      try { const claimed = await this.runner.claimTask(task.id); await new AgentTaskExecutor(this.runner, this.adapter).execute(claimed, this.workingDirectory, sharedContext); return task.id; }
       catch (error: unknown) { if (!(error instanceof Error) || !error.message.includes("409")) throw error; }
     }
     return undefined;
@@ -99,7 +101,7 @@ export interface ProjectPlanner { plan(input: { request: string; snapshot: HubSn
 export class AdapterProjectPlanner implements ProjectPlanner {
   constructor(private readonly adapter: ProjectPlanningAdapter, private readonly workingDirectory: string) {}
   async plan(input: { request: string; snapshot: HubSnapshot }): Promise<OrchestrationPlan> {
-    const projectContext = JSON.stringify({ room: input.snapshot.room.name, agents: input.snapshot.participants.map((participant) => ({ name: participant.name, agent: participant.agent, state: participant.state, capabilities: participant.capabilities ?? [] })), currentTasks: input.snapshot.tasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).map((task) => ({ title: task.title, status: task.status, requiredCapabilities: task.requiredCapabilities, dependencies: task.dependencies })) }, null, 2);
+    const projectContext = JSON.stringify({ room: input.snapshot.room.name, projectMemory: input.snapshot.projectMemory ?? "", agents: input.snapshot.participants.map((participant) => ({ name: participant.name, agent: participant.agent, state: participant.state, capabilities: participant.capabilities ?? [] })), currentTasks: input.snapshot.tasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).map((task) => ({ title: task.title, status: task.status, requiredCapabilities: task.requiredCapabilities, dependencies: task.dependencies })) }, null, 2);
     return this.adapter.planProject({ request: input.request, workingDirectory: this.workingDirectory, projectContext }) as Promise<AgentPlan>;
   }
 }

@@ -4,6 +4,7 @@ import type { HubSnapshot, OrchestrationPlanRecord, Participant, RoomEvent, Task
 import "./styles.css";
 import "./sprites.css";
 import "./monitor.css";
+import "./runner-connect.css";
 
 const defaultHub = "https://mireva-hub.renatojosesfc.workers.dev";
 const roles = ["GENERAL", "ORCHESTRATOR", "DEVELOPMENT", "RESEARCH", "TEST", "REVIEW"] as const;
@@ -29,6 +30,7 @@ function App() {
   const [events, setEvents] = useState<RoomEvent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showOrchestrator, setShowOrchestrator] = useState(false);
+  const [showRunnerConnect, setShowRunnerConnect] = useState(false);
   const [requestText, setRequestText] = useState("");
   const [error, setError] = useState("");
   const load = async () => {
@@ -85,8 +87,9 @@ function App() {
   };
   return <main className="office-app">
     <header className="topbar"><div><p className="eyebrow">MIREVA WORKSPACE <span>•</span> LIVE OFFICE</p><h1>{snapshot?.room.name ?? "Seu escritório de IAs"}</h1><p className="subtitle">Acompanhe a equipe, as tarefas e as decisões em um só lugar.</p></div><div className="topbar-status"><span className={snapshot ? "live-dot" : "offline-dot"} />{snapshot ? "Sala sincronizada" : "Aguardando conexão"}</div></header>
-    <section className="connect-bar" aria-label="Conectar a uma sala"><label>Hub<input value={hub} onChange={(event) => setHub(event.target.value.replace(/\/$/, ""))} aria-label="URL do Hub" /></label><label>Sala<input value={roomCode} onChange={(event) => setRoomCode(event.target.value.toUpperCase())} placeholder="CÓDIGO DA SALA" aria-label="Código da sala" /></label><button onClick={() => void load()}>Abrir escritório <span>↗</span></button></section>
+    <section className="connect-bar" aria-label="Conectar a uma sala"><label>Hub<input value={hub} onChange={(event) => setHub(event.target.value.replace(/\/$/, ""))} aria-label="URL do Hub" /></label><label>Sala<input value={roomCode} onChange={(event) => setRoomCode(event.target.value.toUpperCase())} placeholder="CÓDIGO DA SALA" aria-label="Código da sala" /></label><button onClick={() => void load()}>Abrir escritório <span>↗</span></button><button className="add-runner-button" onClick={() => setShowRunnerConnect(true)}>+ Conectar IA</button></section>
     {error && <p className="error-message">{error}</p>}
+    {showRunnerConnect && <RunnerConnectWizard roomCode={roomCode} hub={hub} onClose={() => setShowRunnerConnect(false)} />}
     {snapshot && <>
       <section className="stats" aria-label="Resumo do projeto"><Metric value={`${activeCount}/5`} label="agentes ativos" /><Metric value={snapshot.tasks.filter((task) => task.status === "RUNNING").length} label="em execução" /><Metric value={snapshot.tasks.filter((task) => task.status === "REVIEW").length} label="pedem decisão" /><Metric value={snapshot.tasks.filter((task) => task.status === "DONE").length} label="entregas feitas" /></section>
       <MonitoringPanel participants={snapshot.participants} assigned={assigned} />
@@ -98,6 +101,18 @@ function App() {
   </main>;
 }
 function Metric({ value, label }: { value: string | number; label: string }) { return <div className="metric"><strong>{value}</strong><span>{label}</span></div>; }
+function RunnerConnectWizard({ roomCode, hub, onClose }: { roomCode: string; hub: string; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [agent, setAgent] = useState<"copilot" | "codex">("copilot");
+  const [role, setRole] = useState<(typeof roles)[number]>("DEVELOPMENT");
+  const [capabilities, setCapabilities] = useState(roleInfo.DEVELOPMENT.capabilities.join(","));
+  const [copied, setCopied] = useState(false);
+  const chooseRole = (next: (typeof roles)[number]) => { setRole(next); setCapabilities(roleInfo[next].capabilities.join(",")); };
+  const quote = (value: string) => `"${value.replaceAll("\"", "\\\"")}"`;
+  const command = `npx --yes github:RenatoJose7/Mireva-Workspace#main -- connect ${roomCode || "CODIGO_DA_SALA"} --hub ${quote(hub)} --name ${quote(name || "Nome do agente")} --agent ${agent} --role ${role} --capabilities ${quote(capabilities.replaceAll(" ", ""))}`;
+  const copy = async () => { try { await navigator.clipboard.writeText(command); setCopied(true); window.setTimeout(() => setCopied(false), 2_500); } catch { setCopied(false); } };
+  return <div className="runner-modal-backdrop" role="presentation" onMouseDown={onClose}><section className="runner-modal" role="dialog" aria-modal="true" aria-labelledby="runner-connect-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={onClose} aria-label="Fechar">×</button><p className="eyebrow">ENTRADA GUIADA</p><h2 id="runner-connect-title">Conectar uma IA à sala</h2><p className="runner-modal-intro">Escolha quem vai trabalhar. Depois, no computador daquela IA, abra a pasta do projeto e cole o único comando abaixo.</p>{!roomCode && <p className="wizard-warning">Abra uma sala ou informe o código da sala antes de copiar o comando.</p>}<div className="runner-form"><label>Nome da estação<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Copilot Frontend" autoFocus /></label><label>IA que vai trabalhar<select value={agent} onChange={(event) => setAgent(event.target.value as "copilot" | "codex")}><option value="copilot">GitHub Copilot</option><option value="codex">ChatGPT Codex</option></select></label><label>Função<select value={role} onChange={(event) => chooseRole(event.target.value as (typeof roles)[number])}>{roles.filter((entry) => entry !== "GENERAL").map((entry) => <option value={entry} key={entry}>{roleInfo[entry].label}</option>)}</select></label><label>Capacidades<input value={capabilities} onChange={(event) => setCapabilities(event.target.value.toUpperCase())} placeholder="CODE,GIT" /></label></div><div className="wizard-steps"><span><b>1</b> Abra a pasta do projeto no PC do runner</span><span><b>2</b> Cole o comando no terminal</span><span><b>3</b> A mesa aparece aqui automaticamente</span></div><div className="generated-command"><span>COMANDO ÚNICO PARA ESTE RUNNER</span><code>{command}</code><button disabled={!roomCode || !name.trim()} onClick={() => void copy()}>{copied ? "Copiado ✓" : "Copiar comando"}</button></div><p className="runner-footnote">O comando instala o Mireva se for necessário, entra nesta sala e deixa o runner trabalhando. O Copilot ou Codex ainda pede o login normal na primeira vez.</p></section></div>;
+}
 function Desk({ person, task, index, selected, onSelect }: { person: Participant | null; task?: Task; index: number; selected: boolean; onSelect: () => void }) {
   if (!person) return <div className="desk-station vacant"><div className="desk-top"><span className="monitor off">+</span><span className="chair" /></div><div className="desk-label"><small>MESA {String(index + 1).padStart(2, "0")}</small><strong>Disponível</strong><span>Convide outro agente</span></div></div>;
   const info = stateInfo[person.state] ?? stateInfo.DISCONNECTED;

@@ -31,10 +31,12 @@ Mireva Workspace launcher
 Uso:
   npx --yes github:RenatoJose7/Mireva-Workspace#main -- setup
   npx --yes github:RenatoJose7/Mireva-Workspace#main -- office
+  npx --yes github:RenatoJose7/Mireva-Workspace#main -- connect CODIGO --name "Copilot" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
   npx --yes github:RenatoJose7/Mireva-Workspace#main -- join CODIGO --name "Copilot" --agent copilot
   npx --yes github:RenatoJose7/Mireva-Workspace#main -- work --adapter copilot
 
 O primeiro comando baixa o runtime em ~/.mireva/runtime e prepara a pasta atual.
+O comando connect entra na sala e mantém o runner trabalhando com um único comando.
 Os comandos seguintes usam .mireva/runner.json da pasta atual. Use --state para outro runner.
 `);
 }
@@ -86,6 +88,17 @@ function runCli(cliCommand, suppliedArgs) {
   if (["work", "orchestrate"].includes(cliCommand)) args.push("--project-dir", targetProject);
   run("npx", ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtimeDirectory, "--filter", "@mireva/cli", "mireva", cliCommand, "--", ...args]);
 }
+function runConnect(suppliedArgs) {
+  const roomCode = suppliedArgs[0];
+  if (!roomCode || roomCode.startsWith("-")) fail("use `mireva connect CODIGO_DA_SALA --name NOME --agent copilot|codex`");
+  const connectionArgs = suppliedArgs.slice(1);
+  const agent = option(connectionArgs, "--agent") ?? "copilot";
+  const role = option(connectionArgs, "--role") ?? "GENERAL";
+  if (!option(connectionArgs, "--name")) fail("informe um nome com `--name` para identificar este runner no escritório");
+  if (!["copilot", "codex", "mock"].includes(agent)) fail("agent deve ser copilot, codex ou mock");
+  runCli("join", [roomCode, ...connectionArgs]);
+  runCli(role === "ORCHESTRATOR" ? "orchestrate" : "work", [...connectionArgs, "--adapter", agent]);
+}
 
 if (["--help", "-h", "help"].includes(command)) { help(); process.exit(0); }
 checkNode();
@@ -113,6 +126,7 @@ if (command === "config") {
   console.log(readFileSync(projectConfigPath(), "utf8"));
   process.exit(0);
 }
+if (command === "connect") { runConnect(rawArgs); process.exit(0); }
 const cliCommands = new Set(["init", "login", "create", "join", "start", "work", "orchestrate", "status", "agents", "task-create", "tasks", "task-claim", "task-update", "limit-report", "doctor", "leave"]);
 if (!cliCommands.has(command)) { help(); fail(`comando desconhecido: ${command}`); }
 runCli(command, rawArgs);

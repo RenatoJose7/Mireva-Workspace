@@ -13,10 +13,10 @@ Ele baixa o runtime em `~/.mireva/runtime`, instala as dependências, prepara `.
 Em outro computador, execute o mesmo comando sem `--office` e conecte o runner à sala:
 
 ```powershell
-npx --yes github:RenatoJose7/Mireva-Workspace#main -- setup
-npx --yes github:RenatoJose7/Mireva-Workspace#main -- join 2B7E325E --name "Copilot Frontend" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
-npx --yes github:RenatoJose7/Mireva-Workspace#main -- work --adapter copilot
+npx --yes github:RenatoJose7/Mireva-Workspace#main -- connect 2B7E325E --name "Copilot Frontend" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
 ```
+
+No Office, o botão **Conectar IA** gera esse comando automaticamente depois que você escolhe o nome, a IA e a função. Cole-o no terminal aberto dentro da pasta do projeto, no computador que será o runner. O lançador instala o que estiver faltando, entra na sala e mantém o agente trabalhando.
 
 O lançador guarda o estado de cada máquina em `.mireva/runner.json`. Para usar mais de um runner na mesma pasta, informe `--state .mireva/nome-do-runner.json`. Quando o pacote for publicado no npm, a mesma experiência passará a usar `npx @renatojose7/mireva` em vez do endereço do GitHub.
 

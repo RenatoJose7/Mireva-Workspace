@@ -50,8 +50,8 @@ export class CopilotCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     return outcome.code === 0 ? { installed: true, version: outcome.output.trim() || undefined } : { installed: false, reason: "GitHub Copilot CLI não encontrado. Instale-o e confirme que o comando 'copilot' está no PATH." };
   }
   async checkAuthentication(): Promise<AdapterAuthentication> {
-    const outcome = await this.run(this.command, ["auth", "status"]);
-    return outcome.code === 0 ? { authenticated: true } : { authenticated: false, reason: outcome.output.trim() || "Copilot CLI não autenticado. Execute 'copilot auth login'." };
+    const outcome = await this.run(this.command, ["-p", "Responda somente com READY. Esta é uma verificação de conexão do Mireva Workspace."]);
+    return outcome.code === 0 ? { authenticated: true } : { authenticated: false, reason: outcome.output.trim() || "Copilot CLI não autenticado. Abra 'copilot' uma vez e conclua o login interativo." };
   }
   async getCapabilities(): Promise<AgentCapability[]> { return ["CODE", "RESEARCH", "TEST", "GIT", "CANCEL"]; }
   async planProject(request: AgentPlanningRequest): Promise<AgentPlan> {

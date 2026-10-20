@@ -65,9 +65,11 @@ O Codex trabalha no diretório em que o comando foi iniciado. Ele não recebe pe
 Instale e autentique o **GitHub Copilot CLI** no computador que será o runner. A extensão do VS Code não é suficiente para o runner automático.
 
 ```powershell
-copilot auth login
+copilot
 pnpm cli doctor -- --hub https://mireva-hub.renatojosesfc.workers.dev --adapter copilot
 ```
+
+No primeiro comando, conclua o login interativo do Copilot e saia dele antes de executar o `doctor`. As versões atuais do Copilot CLI não usam mais `copilot auth login`.
 
 Entre na sala e inicie o trabalhador. O primeiro comando processa uma tarefa; o segundo acompanha a fila continuamente:
 

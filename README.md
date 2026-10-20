@@ -123,6 +123,24 @@ pnpm cli task-create -- --state .mireva\runner-a.json --title "Implementar check
 pnpm cli join 2B7E325E -- --hub https://mireva-hub.renatojosesfc.workers.dev --name "Pesquisador" --agent gemini --capabilities RESEARCH --state .mireva\runner-research.json
 ```
 
+## Acompanhamento de limites
+
+O Office mostra quando cada runner foi visto pela última vez, sua tarefa atual e um indicador de limite. Como Codex, Copilot e outros provedores não oferecem um formato único de saldo pelo terminal, esse indicador é **informado manualmente**: ele não consulta nem estima créditos por conta própria.
+
+Você pode preencher os campos **Limite do provedor** no painel da estação ou reportar pelo terminal do próprio runner:
+
+```powershell
+pnpm cli limit-report -- --state .mireva\runner-copilot.json --used 72 --limit 100 --unit "mensagens" --reset-at "2026-11-01T00:00:00.000Z"
+```
+
+O Office destaca em amarelo a partir de 70% e em vermelho a partir de 90%. Depois de atualizar o projeto, publique o Hub uma vez para disponibilizar esse acompanhamento remoto:
+
+```powershell
+git pull
+pnpm install
+pnpm hub:deploy
+```
+
 ## Demonstração com dois Runners
 
 No primeiro terminal:

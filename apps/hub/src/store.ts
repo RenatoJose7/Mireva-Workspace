@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, Room, RoomEvent, Task } from "@mireva/protocol";
+import type { AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, ProviderUsage, Room, RoomEvent, Task } from "@mireva/protocol";
 
 interface StoredRoom extends HubSnapshot { events: RoomEvent[] }
 interface StoreFile { rooms: Record<string, StoredRoom> }
@@ -20,7 +20,7 @@ export class LocalHubStore {
   async createRoom(name: string, ownerName: string): Promise<{ room: Room; owner: Participant }> {
     const id = randomUUID(); const ownerId = randomUUID(); const createdAt = now();
     const room: Room = { id, code: roomCode(), name, ownerId, createdAt };
-    const owner: Participant = { id: ownerId, roomId: id, name: ownerName, agent: "human", state: "AVAILABLE", role: "GENERAL", capabilities: [], joinedAt: createdAt, lastSeenAt: createdAt };
+    const owner: Participant = { id: ownerId, roomId: id, name: ownerName, agent: "human", state: "AVAILABLE", role: "GENERAL", capabilities: [], usage: null, joinedAt: createdAt, lastSeenAt: createdAt };
     this.data.rooms[room.code] = { room, participants: [owner], tasks: [], plans: [], events: [], lastSequence: 0 };
     await this.save(); return { room, owner };
   }
@@ -37,7 +37,7 @@ export class LocalHubStore {
     found.tasks ??= [];
     found.events ??= [];
     if (found.participants.length >= 6) throw new Error("Room capacity reached");
-    const participant: Participant = { id: randomUUID(), roomId: found.room.id, name, agent, state: "AVAILABLE", role, capabilities, joinedAt: now(), lastSeenAt: now() };
+    const participant: Participant = { id: randomUUID(), roomId: found.room.id, name, agent, state: "AVAILABLE", role, capabilities, usage: null, joinedAt: now(), lastSeenAt: now() };
     found.participants.push(participant); await this.append(found, "PARTICIPANT_JOINED", participant.id, { participant }); await this.save(); return structuredClone(participant);
   }
   async presence(code: string, participantId: string, state: AgentState): Promise<boolean> {
@@ -49,6 +49,13 @@ export class LocalHubStore {
     const found = this.data.rooms[code]; if (!found || found.room.ownerId !== ownerId) return undefined;
     const participant = found.participants.find((entry) => entry.id === participantId); if (!participant) return undefined;
     participant.role = role; participant.capabilities = capabilities; await this.append(found, "PARTICIPANT_CONFIGURED", ownerId, { participant }); await this.save(); return structuredClone(participant);
+  }
+  async reportUsage(code: string, participantId: string, reporterId: string, input: Omit<ProviderUsage, "reportedAt">): Promise<Participant | undefined> {
+    const found = this.data.rooms[code]; if (!found) return undefined;
+    const participant = found.participants.find((entry) => entry.id === participantId); if (!participant) return undefined;
+    if (reporterId !== participantId && reporterId !== found.room.ownerId) return undefined;
+    participant.usage = { used: input.used, limit: input.limit, unit: input.unit, resetAt: input.resetAt, reportedAt: now() };
+    await this.append(found, "USAGE_REPORTED", reporterId, { participantId, usage: participant.usage }); await this.save(); return structuredClone(participant);
   }
   async event(code: string, participantId: string, kind: RoomEvent["kind"], payload: Record<string, unknown>): Promise<RoomEvent | undefined> {
     const found = this.data.rooms[code]; if (!found || !found.participants.some((p) => p.id === participantId)) return undefined;
@@ -119,7 +126,7 @@ export class LocalHubStore {
   }
   private async refreshPresence(room: StoredRoom): Promise<void> {
     const cutoff = Date.now() - 20_000; let changed = false;
-    for (const participant of room.participants) { participant.role ??= "GENERAL"; participant.capabilities ??= []; if (participant.state !== "DISCONNECTED" && Date.parse(participant.lastSeenAt) < cutoff) { participant.state = "DISCONNECTED"; await this.append(room, "PRESENCE", participant.id, { state: "DISCONNECTED" }); changed = true; } }
+    for (const participant of room.participants) { participant.role ??= "GENERAL"; participant.capabilities ??= []; participant.usage ??= null; if (participant.state !== "DISCONNECTED" && Date.parse(participant.lastSeenAt) < cutoff) { participant.state = "DISCONNECTED"; await this.append(room, "PRESENCE", participant.id, { state: "DISCONNECTED" }); changed = true; } }
     for (const task of room.tasks) if (task.assignedParticipantId && ["CLAIMED", "RUNNING", "REVIEW"].includes(task.status) && room.participants.some((participant) => participant.id === task.assignedParticipantId && participant.state === "DISCONNECTED")) { task.status = "BLOCKED"; task.updatedAt = now(); await this.append(room, "TASK_UPDATED", null, { task, reason: "ASSIGNEE_DISCONNECTED" }); changed = true; }
     if (changed) await this.save();
   }

@@ -23,6 +23,9 @@ export class MirevaRunner {
   async availableTasks(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/tasks/available`) as Promise<Task[]>; }
   async assignedTasks(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/tasks/assigned?participantId=${this.config.participantId}`) as Promise<Task[]>; }
   async dispatchTasks(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/tasks/dispatch`, { method: "POST", body: { ownerId: this.config.participantId } }) as Promise<Task[]>; }
+  async reportUsage(input: { used: number; limit: number; unit?: string; resetAt?: string | null }): Promise<Participant> {
+    return this.request(`/rooms/${this.config.roomCode}/participants/${this.config.participantId}/usage`, { method: "POST", body: { reporterId: this.config.participantId, used: input.used, limit: input.limit, unit: input.unit ?? "créditos", resetAt: input.resetAt ?? null } }) as Promise<Participant>;
+  }
   async snapshot(): Promise<HubSnapshot> { return this.request(`/rooms/${this.config.roomCode}`) as Promise<HubSnapshot>; }
   async createPlan(input: { request: string; summary: string; tasks: OrchestrationPlanRecord["tasks"] }): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans`, { method: "POST", body: { participantId: this.config.participantId, ...input } }) as Promise<OrchestrationPlanRecord>; }
   async decidePlan(planId: string, status: "APPROVED" | "REJECTED"): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans/${planId}/decision`, { method: "POST", body: { ownerId: this.config.participantId, status } }) as Promise<OrchestrationPlanRecord>; }

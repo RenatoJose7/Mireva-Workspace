@@ -31,6 +31,7 @@ async function run(): Promise<void> {
   if (command === "tasks") { const runner = new MirevaRunner(await loadState()); return output(await runner.availableTasks()); }
   if (command === "task-claim") { const taskId = args[1]; if (!taskId) throw new Error("Usage: mireva task-claim ID"); return output(await new MirevaRunner(await loadState()).claimTask(taskId)); }
   if (command === "task-update") { const taskId = args[1]; const status = value("--status"); if (!taskId || !status) throw new Error("Usage: mireva task-update ID --status STATUS [--result TEXTO]"); return output(await new MirevaRunner(await loadState()).updateTask(taskId, status as never, value("--result"))); }
+  if (command === "limit-report") { const used = Number(value("--used")); const limit = Number(value("--limit")); if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) throw new Error("Usage: mireva limit-report --used NUMERO --limit NUMERO [--unit créditos] [--reset-at ISO]"); return output(await new MirevaRunner(await loadState()).reportUsage({ used, limit, unit: value("--unit", "créditos"), resetAt: value("--reset-at") ?? null })); }
   if (command === "start") { const config = await loadState(); const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) }); await runner.setPresence("AVAILABLE"); if (args.includes("--once")) { await runner.poll(); await saveState(config); return; } runner.start(Number(value("--interval", "1000"))); process.on("SIGINT", () => { runner.stop(); void saveState(config).then(() => process.exit(0)); }); return; }
   if (command === "work") {
     const config = await loadState(); const adapter = createAdapter(value("--adapter", "mock")!);
@@ -61,5 +62,5 @@ async function run(): Promise<void> {
   if (command === "leave") { await rm(stateFile(), { force: true }); return output({ left: true }); }
   throw new Error(`Unknown command: ${command}`);
 }
-function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot [--project-dir PASTA], orchestrate --adapter codex|copilot [--project-dir PASTA], status, agents, task-create, tasks, task-claim ID, task-update ID, doctor --adapter mock|codex|copilot, leave"); }
+function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot [--project-dir PASTA], orchestrate --adapter codex|copilot [--project-dir PASTA], status, agents, task-create, tasks, task-claim ID, task-update ID, limit-report, doctor --adapter mock|codex|copilot, leave"); }
 run().catch((error: unknown) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

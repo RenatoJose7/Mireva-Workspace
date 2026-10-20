@@ -52,6 +52,13 @@ describe("local hub", () => {
     const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; role: string; capabilities: string[] }> };
     expect(snapshot.participants.find((participant) => participant.id === runner.id)).toMatchObject({ role: "DEVELOPMENT", capabilities: ["CODE", "TEST"] });
   });
+  it("stores a runner limit report from the runner itself", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mireva-usage-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
+    const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Usage", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
+    const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Codex", agent: "codex" }) }).then((r) => r.json()) as { id: string };
+    const reported = await fetch(`${hub.url}/rooms/${created.room.code}/participants/${runner.id}/usage`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reporterId: runner.id, used: 72, limit: 100, unit: "créditos", resetAt: "2026-11-01T00:00:00.000Z" }) }).then((r) => r.json()) as { usage: { used: number; limit: number; unit: string } };
+    expect(reported.usage).toMatchObject({ used: 72, limit: 100, unit: "créditos" });
+  });
   it("lets the room owner approve a reviewed task", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mireva-review-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
     const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Review", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };

@@ -1,0 +1,32 @@
+.monitoring-section {
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid #27314d;
+  border-radius: 19px;
+  background: rgba(16, 21, 35, .85);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .18);
+}
+
+.runner-watch-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 0 18px 18px; }
+.runner-watch { min-width: 0; padding: 12px; border: 1px solid #2a3552; border-radius: 12px; background: linear-gradient(145deg, #171e30, #101622); }
+.runner-watch header { display: flex; align-items: center; gap: 8px; }
+.runner-watch header img { width: 31px; height: 31px; padding: 1px; border: 1px solid #647dbd; border-radius: 7px; image-rendering: pixelated; }
+.runner-watch header div { min-width: 0; flex: 1; }
+.runner-watch header strong,.runner-watch header span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runner-watch header strong { color: #e4eaff; font-size: .68rem; }
+.runner-watch header span { margin-top: 2px; color: #8f9bb9; font-size: .55rem; }
+.runner-watch header>i { width: 7px; height: 7px; border-radius: 50%; }
+.runner-watch>p { overflow: hidden; min-height: 29px; margin: 11px 0 8px; color: #abb6d2; font-size: .6rem; line-height: 1.4; text-overflow: ellipsis; }
+.limit-bar { height: 5px; overflow: hidden; border-radius: 99px; background: #2a3551; }
+.limit-bar i { display: block; height: 100%; border-radius: inherit; background: #62dcac; }
+.limit-bar.warning i { background: #ffce69; }.limit-bar.danger i { background: #fa7180; }
+.runner-watch footer { display: flex; align-items: center; gap: 5px; margin-top: 7px; color: #8b97b8; font-size: .55rem; }
+.runner-watch footer b { color: #dae4ff; }.runner-watch footer em { margin-left: auto; color: #7180a1; font-style: normal; white-space: nowrap; }.runner-watch .limit-empty { color: #687596; }
+
+.usage-config { display: grid; gap: 8px; margin-top: 16px; padding: 12px; border: 1px solid #3c4d75; border-radius: 12px; background: #121b2d; }
+.usage-config>div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.usage-config>div:first-child span { color: #b2c1ee; font: 500 .53rem "DM Mono", monospace; letter-spacing: .1em; }.usage-config>div:first-child b { color: #d5e2ff; font-size: .58rem; }.usage-config>p { margin: 0; color: #8d9ab9; font-size: .58rem; line-height: 1.4; }
+.usage-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }.usage-fields label { display: grid; gap: 4px; color: #aeb9d7; font-size: .56rem; font-weight: 700; }.usage-fields input { width: 100%; border: 1px solid #354363; border-radius: 6px; padding: 7px; background: #0c1220; color: #e7edff; font-size: .62rem; outline: none; }.usage-fields input:focus { border-color: #7895f9; }
+.usage-config button { border: 1px solid #4a6b97; border-radius: 7px; padding: 8px; background: #223a62; color: #d6e6ff; font-size: .6rem; font-weight: 800; cursor: pointer; }.usage-config button:disabled { opacity: .45; cursor: not-allowed; }
+
+@media (max-width: 1000px) { .runner-watch-list { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 650px) { .runner-watch-list { grid-template-columns: 1fr; padding: 0 14px 14px; }.runner-watch>p { min-height: 0; }.usage-config { margin-bottom: 8px; } }

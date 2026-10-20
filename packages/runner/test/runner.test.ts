@@ -19,6 +19,13 @@ describe("MirevaRunner", () => {
     await second.poll();
     expect(delivered).toEqual(["contexto da tarefa A"]);
   });
+  it("reports the configured provider limit for the Office", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-usage-runner-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Usage", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
+    const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Codex", "codex"));
+    await runner.reportUsage({ used: 8, limit: 20, unit: "tarefas" });
+    expect((await runner.snapshot()).participants.find((entry) => entry.id === runner.config.participantId)?.usage).toMatchObject({ used: 8, limit: 20, unit: "tarefas" });
+  });
   it("executes a claimed task through an adapter and submits it for review", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-executor-")), "hub.json") });
     const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Executor", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };

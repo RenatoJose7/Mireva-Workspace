@@ -16,7 +16,7 @@ Em outro computador, execute o mesmo comando sem `--office` e conecte o runner �
 npx --yes github:RenatoJose7/Mireva-Workspace#main -- connect 2B7E325E --name "Copilot Frontend" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
 ```
 
-No Office, o botão **Conectar IA** gera esse comando automaticamente depois que você escolhe o nome, a IA e a função. Cole-o no terminal aberto dentro da pasta do projeto, no computador que será o runner. O lançador instala o que estiver faltando, entra na sala e mantém o agente trabalhando.
+No Office, o botão **Conectar IA** gera esse comando automaticamente depois que você escolhe o nome e a IA. Runners entram como agentes gerais; o orquestrador decide as tarefas compatíveis com as capacidades deles. Cole-o no terminal aberto dentro da pasta do projeto, no computador que será o runner.
 
 O lançador guarda o estado de cada máquina em `.mireva/runner.json`. Para usar mais de um runner na mesma pasta, informe `--state .mireva/nome-do-runner.json`. Quando o pacote for publicado no npm, a mesma experiência passará a usar `npx @renatojose7/mireva` em vez do endereço do GitHub.
 
@@ -28,7 +28,7 @@ Abra o Office pelo lançador para iniciar também o **Mireva Agent local**:
 npx --yes github:RenatoJose7/Mireva-Workspace#main -- office
 ```
 
-No botão **Conectar IA**, escolha o agente, a função e a pasta do projeto. Em seguida, **Iniciar nesta máquina** cria o runner e o mantém ativo sem montar um comando manualmente. O painel também gera um convite com link e QR Code para computadores na mesma rede; no outro computador, abra o convite e conecte a IA por essa mesma tela.
+No botão **Conectar IA**, escolha o agente e a pasta do projeto. Em seguida, **Iniciar nesta máquina** cria o runner e o mantém ativo sem montar um comando manualmente. Marque **orquestrador inicial** apenas para a IA que criará os planos; todos os outros entram como runners gerais. O painel também gera um convite com link e QR Code para computadores na mesma rede; no outro computador, abra o convite e conecte a IA por essa mesma tela.
 
 No centro do Orquestrador existe a **Memória do projeto**. Use-a para registrar decisões, tecnologias, regras e objetivos. Ela é enviada ao orquestrador durante o planejamento e aos runners quando executam tarefas.
 

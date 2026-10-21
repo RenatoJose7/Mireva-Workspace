@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require("node:child_process");
 
 const DEFAULT_HUB = "https://mireva-hub.renatojosesfc.workers.dev";
 const PNPM_VERSION = "11.25.0";
-const AGENT_CONFIG_VERSION = 3;
+const AGENT_CONFIG_VERSION = 4;
 const configFile = () => join(process.env.MIREVA_HOME || join(homedir(), ".mireva"), "agent.json");
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 function agentConfig() {
@@ -19,7 +19,7 @@ function agentConfig() {
   // detached agents can survive a terminal/PC restart; rotating the endpoint
   // endpoint lets an updated launcher start cleanly instead of talking to a
   // stale process that still has the old bridge code in memory.
-  const config = { version: AGENT_CONFIG_VERSION, port: 49323, token: randomBytes(24).toString("hex") };
+  const config = { version: AGENT_CONFIG_VERSION, port: 49324, token: randomBytes(24).toString("hex") };
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   return config;
 }
@@ -32,7 +32,8 @@ function valid(input) {
   if (typeof input.name !== "string" || !input.name.trim() || input.name.length > 80) throw new Error("Informe um nome para a estação");
   const projectDirectory = resolve(String(input.projectDirectory ?? process.cwd()));
   if (!existsSync(projectDirectory)) throw new Error("A pasta do projeto não existe neste computador");
-  return { roomCode: input.roomCode.toUpperCase(), hub: String(input.hub || DEFAULT_HUB).replace(/\/$/, ""), name: input.name.trim(), agent: input.agent, role: input.role, capabilities: Array.isArray(input.capabilities) ? input.capabilities.map(String).map((value) => value.trim().toUpperCase()).filter(Boolean).slice(0, 12) : [], projectDirectory };
+  const permissionProfile = ["READ_ONLY", "PROJECT", "PROJECT_NETWORK", "FULL"].includes(input.permissionProfile) ? input.permissionProfile : input.role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT";
+  return { roomCode: input.roomCode.toUpperCase(), hub: String(input.hub || DEFAULT_HUB).replace(/\/$/, ""), name: input.name.trim(), agent: input.agent, role: input.role, capabilities: Array.isArray(input.capabilities) ? input.capabilities.map(String).map((value) => value.trim().toUpperCase()).filter(Boolean).slice(0, 12) : [], permissionProfile, projectDirectory };
 }
 // The runtime uses Corepack/npx to install dependencies, which does not place a
 // `pnpm` executable in its node_modules/.bin directory. Invoke the pinned
@@ -41,7 +42,7 @@ function valid(input) {
 function command(runtime, args, options = {}) {
   return spawn(executable("npx"), ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtime, "--filter", "@mireva/cli", "mireva", ...args], options);
 }
-function runJoin(runtime, input, state) { return new Promise((resolve, reject) => { const child = command(runtime, ["join", input.roomCode, "--hub", input.hub, "--name", input.name, "--agent", input.agent, "--role", input.role, "--capabilities", input.capabilities.join(","), "--state", state], { cwd: input.projectDirectory, stdio: "pipe" }); let error = ""; child.stderr.on("data", (chunk) => { error += chunk; }); child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(error.trim() || "Não foi possível entrar na sala"))); }); }
+function runJoin(runtime, input, state) { return new Promise((resolve, reject) => { const child = command(runtime, ["join", input.roomCode, "--hub", input.hub, "--name", input.name, "--agent", input.agent, "--role", input.role, "--capabilities", input.capabilities.join(","), "--permissions", input.permissionProfile, "--state", state], { cwd: input.projectDirectory, stdio: "pipe" }); let error = ""; child.stderr.on("data", (chunk) => { error += chunk; }); child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(error.trim() || "Não foi possível entrar na sala"))); }); }
 function canReuseState(state, input) {
   try { const saved = JSON.parse(readFileSync(state, "utf8")); return saved.roomCode === input.roomCode && String(saved.hubUrl ?? "").replace(/\/$/, "") === input.hub && Boolean(saved.participantId); }
   catch { return false; }

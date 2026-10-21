@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCopilotPlanningPrompt, buildCopilotPrompt, parseCopilotPlan } from "../src/index.js";
+import { buildCopilotPlanningPrompt, buildCopilotPrompt, copilotPermissionArgs, parseCopilotPlan } from "../src/index.js";
 
 describe("CopilotCliAdapter", () => {
   it("builds a scoped task prompt", () => {
@@ -15,5 +15,10 @@ describe("CopilotCliAdapter", () => {
   });
   it("accepts a conversational reply without tasks", () => {
     expect(parseCopilotPlan('{"summary":"Qual público você quer atender?","tasks":[]}')).toEqual({ summary: "Qual público você quer atender?", tasks: [] });
+  });
+  it("maps the Office permission profile to non-interactive Copilot flags", () => {
+    expect(copilotPermissionArgs("READ_ONLY")).toContain("--deny-tool=shell");
+    expect(copilotPermissionArgs("PROJECT_NETWORK")).toContain("--allow-all-urls");
+    expect(copilotPermissionArgs("FULL")).toEqual(["--allow-all"]);
   });
 });

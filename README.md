@@ -24,7 +24,9 @@ Abra o Office pelo lançador para iniciar também o **Mireva Agent local**:
 npx @renatojose7/mireva office
 ```
 
-No botão **Conectar IA**, escolha o agente e a pasta do projeto. Em seguida, **Iniciar nesta máquina** cria o runner e o mantém ativo sem montar um comando manualmente. Marque **orquestrador inicial** apenas para a IA que criará os planos; todos os outros entram como runners gerais. O painel também gera um convite com link e QR Code para computadores na mesma rede; no outro computador, abra o convite e conecte a IA por essa mesma tela.
+No botão **Conectar IA**, escolha o agente, a pasta do projeto e a permissão inicial. Em seguida, **Iniciar nesta máquina** cria o runner e o mantém ativo sem montar um comando manualmente. Marque **orquestrador inicial** apenas para a IA que criará os planos; todos os outros entram como runners gerais. O painel também gera um convite com link e QR Code para computadores na mesma rede; no outro computador, abra o convite e conecte a IA por essa mesma tela.
+
+Ao selecionar uma estação no escritório, você pode conversar diretamente com aquele agente e alterar sua política entre **Somente leitura**, **Trabalhar no projeto**, **Projeto + internet** e **Acesso ampliado**. O perfil normal autoriza as ferramentas do Copilot dentro do fluxo não interativo, mas continua bloqueando publicação e comandos administrativos conhecidos. O perfil ampliado remove proteções do CLI e deve ser usado apenas em ambiente controlado.
 
 No centro do Orquestrador existe a **Memória do projeto**. Use-a para registrar decisões, tecnologias, regras e objetivos. Ela é enviada ao orquestrador durante o planejamento e aos runners quando executam tarefas.
 
@@ -86,7 +88,7 @@ pnpm cli work -- --state .mireva\runner-codex.json --adapter codex --once
 pnpm cli work -- --state .mireva\runner-codex.json --adapter codex
 ```
 
-O Codex trabalha no diretório em que o comando foi iniciado. Ele não recebe permissões globais nem comandos para ignorar proteções: qualquer aprovação continua sob controle do usuário. Ao concluir, a tarefa vai para `REVIEW`; a decisão de marcar `DONE` permanece humana por enquanto.
+O Codex trabalha no diretório em que o comando foi iniciado e usa a política escolhida no Office. O padrão permite alterações no projeto; o perfil de leitura mantém o sandbox sem escrita, e o acesso ampliado precisa ser selecionado explicitamente. Ao concluir, a tarefa vai para `REVIEW`; a decisão de marcar `DONE` permanece humana.
 
 ## Executar uma tarefa com o GitHub Copilot
 
@@ -107,7 +109,7 @@ pnpm cli work -- --state .mireva\runner-copilot.json --adapter copilot --once
 pnpm cli work -- --state .mireva\runner-copilot.json --adapter copilot
 ```
 
-O Mireva chama `copilot -p` dentro do diretório em que o comando foi iniciado. O Copilot continua respeitando as confirmações e permissões configuradas no próprio CLI; depois da entrega, a tarefa aparece em `REVIEW` para aprovação humana.
+O Mireva chama `copilot -p` dentro do diretório em que o comando foi iniciado e traduz a política da estação para as opções de permissão do Copilot CLI. Isso evita prompts invisíveis no runner não interativo. Publicação e `sudo` permanecem negados no perfil normal; depois da entrega, a tarefa aparece em `REVIEW` para aprovação humana.
 
 ## Conversar com o orquestrador
 

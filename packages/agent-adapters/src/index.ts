@@ -1,12 +1,14 @@
 export type AgentCapability = "CODE" | "RESEARCH" | "TEST" | "GIT" | "STRUCTURED_OUTPUT" | "CANCEL";
+export type AgentPermissionProfile = "READ_ONLY" | "PROJECT" | "PROJECT_NETWORK" | "FULL";
 export interface AdapterDetection { installed: boolean; version?: string; reason?: string }
 export interface AdapterAuthentication { authenticated: boolean; reason?: string }
-export interface AgentExecutionRequest { taskId: string; title: string; instructions: string; workingDirectory: string; context: string[] }
+export interface AgentExecutionRequest { taskId: string; title: string; instructions: string; workingDirectory: string; context: string[]; permissionProfile?: AgentPermissionProfile }
+export interface AgentConversationRequest { message: string; workingDirectory: string; context: string[]; permissionProfile?: AgentPermissionProfile }
 export type AgentExecutionEvent = { type: "STARTED" | "PROGRESS" | "LOG" | "COMPLETED" | "FAILED" | "CANCELLED"; message: string; at: string };
 export interface AgentExecutionResult { taskId: string; status: "COMPLETED" | "FAILED" | "CANCELLED"; summary: string; files: string[]; branch?: string; startedAt: string; completedAt: string }
 export interface AgentPlanTask { title: string; description: string; dependencies: number[]; priority: number; requiredCapabilities: string[]; acceptanceCriteria: string[] }
 export interface AgentPlan { summary: string; tasks: AgentPlanTask[] }
-export interface AgentPlanningRequest { request: string; workingDirectory: string; projectContext: string }
+export interface AgentPlanningRequest { request: string; workingDirectory: string; projectContext: string; permissionProfile?: AgentPermissionProfile }
 export interface ProjectPlanningAdapter { planProject(request: AgentPlanningRequest): Promise<AgentPlan> }
 
 export interface AgentAdapter {
@@ -14,6 +16,7 @@ export interface AgentAdapter {
   detect(): Promise<AdapterDetection>;
   checkAuthentication(): Promise<AdapterAuthentication>;
   getCapabilities(): Promise<AgentCapability[]>;
+  respondToMessage(request: AgentConversationRequest): Promise<string>;
   executeTask(request: AgentExecutionRequest): Promise<void>;
   streamEvents(taskId: string): AsyncIterable<AgentExecutionEvent>;
   cancelTask(taskId: string): Promise<void>;
@@ -28,6 +31,7 @@ export class MockAgentAdapter implements AgentAdapter {
   async detect(): Promise<AdapterDetection> { return { installed: true, version: "test" }; }
   async checkAuthentication(): Promise<AdapterAuthentication> { return { authenticated: true }; }
   async getCapabilities(): Promise<AgentCapability[]> { return ["CODE", "RESEARCH", "TEST", "GIT", "STRUCTURED_OUTPUT", "CANCEL"]; }
+  async respondToMessage(request: AgentConversationRequest): Promise<string> { return `Mock respondeu: ${request.message}`; }
   async executeTask(request: AgentExecutionRequest): Promise<void> {
     const startedAt = new Date().toISOString(); const execution: MockExecution = { cancelled: false, events: [{ type: "STARTED", message: `Iniciando: ${request.title}`, at: startedAt }, { type: "PROGRESS", message: "Mock executando tarefa", at: new Date().toISOString() }] };
     this.executions.set(request.taskId, execution);
@@ -39,4 +43,4 @@ export class MockAgentAdapter implements AgentAdapter {
 }
 
 export { CodexCliAdapter, buildCodexPlanningPrompt, buildCodexPrompt, parseCodexPlanOutput } from "./codex.js";
-export { CopilotCliAdapter, buildCopilotPlanningPrompt, buildCopilotPrompt, parseAgentPlan, parseCopilotPlan } from "./copilot.js";
+export { CopilotCliAdapter, buildCopilotPlanningPrompt, buildCopilotPrompt, copilotPermissionArgs, parseAgentPlan, parseCopilotPlan } from "./copilot.js";

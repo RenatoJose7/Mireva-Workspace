@@ -1,5 +1,5 @@
 import type { AgentAdapter, AgentExecutionRequest, AgentPlan, ProjectPlanningAdapter } from "@mireva/agent-adapters";
-import type { AgentRole, AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, RoomEvent, Task } from "@mireva/protocol";
+import type { AgentRole, AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, PermissionProfile, RoomEvent, Task } from "@mireva/protocol";
 
 export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; role?: AgentRole; capabilities: string[]; lastSequence: number }
 export interface RunnerCallbacks { onEvent?(event: RoomEvent): void; onError?(error: Error): void }
@@ -50,8 +50,8 @@ export class MirevaRunner {
   }
 }
 
-export async function joinRunner(hubUrl: string, roomCode: string, name: string, agent: string, capabilities: string[] = [], role: AgentRole = "GENERAL"): Promise<RunnerConfig> {
-  const response = await fetch(`${hubUrl}/rooms/${roomCode}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, agent, role, capabilities }) });
+export async function joinRunner(hubUrl: string, roomCode: string, name: string, agent: string, capabilities: string[] = [], role: AgentRole = "GENERAL", permissionProfile: PermissionProfile = role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT"): Promise<RunnerConfig> {
+  const response = await fetch(`${hubUrl}/rooms/${roomCode}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, agent, role, capabilities, permissionProfile }) });
   if (!response.ok) throw new Error(`Could not join room: ${await response.text()}`);
   const participant = await response.json() as Participant;
   return { hubUrl, roomCode, participantId: participant.id, name, agent, role, capabilities, lastSequence: 0 };
@@ -59,8 +59,8 @@ export async function joinRunner(hubUrl: string, roomCode: string, name: string,
 
 export class AgentTaskExecutor {
   constructor(private readonly runner: MirevaRunner, private readonly adapter: AgentAdapter) {}
-  async execute(task: Task, workingDirectory: string, context: string[] = []): Promise<void> {
-    const request: AgentExecutionRequest = { taskId: task.id, title: task.title, instructions: task.description, workingDirectory, context };
+  async execute(task: Task, workingDirectory: string, context: string[] = [], permissionProfile: PermissionProfile = "PROJECT"): Promise<void> {
+    const request: AgentExecutionRequest = { taskId: task.id, title: task.title, instructions: task.description, workingDirectory, context, permissionProfile };
     await this.runner.setPresence("WORKING");
     await this.runner.updateTask(task.id, "RUNNING");
     const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
@@ -79,15 +79,17 @@ export class AgentTaskExecutor {
 export class RunnerTaskWorker {
   constructor(private readonly runner: MirevaRunner, private readonly adapter: AgentAdapter, private readonly workingDirectory: string) {}
   async runOnce(context: string[] = []): Promise<string | undefined> {
-    const memory = (await this.runner.snapshot()).projectMemory?.trim();
+    const snapshot = await this.runner.snapshot();
+    const memory = snapshot.projectMemory?.trim();
     const sharedContext = memory ? [...context, `Memória do projeto (siga estas decisões):\n${memory}`] : context;
     const assigned = await this.runner.assignedTasks();
-    for (const task of assigned) { await new AgentTaskExecutor(this.runner, this.adapter).execute(task, this.workingDirectory, sharedContext); return task.id; }
-    const participant = (await this.runner.snapshot()).participants.find((entry) => entry.id === this.runner.config.participantId);
+    const participant = snapshot.participants.find((entry) => entry.id === this.runner.config.participantId);
+    const permissionProfile = participant?.permissionProfile ?? "PROJECT";
+    for (const task of assigned) { await new AgentTaskExecutor(this.runner, this.adapter).execute(task, this.workingDirectory, sharedContext, permissionProfile); return task.id; }
     const capabilities = participant?.capabilities ?? this.runner.config.capabilities ?? [];
     const tasks = (await this.runner.availableTasks()).filter((task) => task.requiredCapabilities.every((capability) => capabilities.includes(capability)));
     for (const task of tasks) {
-      try { const claimed = await this.runner.claimTask(task.id); await new AgentTaskExecutor(this.runner, this.adapter).execute(claimed, this.workingDirectory, sharedContext); return task.id; }
+      try { const claimed = await this.runner.claimTask(task.id); await new AgentTaskExecutor(this.runner, this.adapter).execute(claimed, this.workingDirectory, sharedContext, permissionProfile); return task.id; }
       catch (error: unknown) { if (!(error instanceof Error) || !error.message.includes("409")) throw error; }
     }
     return undefined;
@@ -102,7 +104,31 @@ export class AdapterProjectPlanner implements ProjectPlanner {
   constructor(private readonly adapter: ProjectPlanningAdapter, private readonly workingDirectory: string) {}
   async plan(input: { request: string; snapshot: HubSnapshot }): Promise<OrchestrationPlan> {
     const projectContext = JSON.stringify({ room: input.snapshot.room.name, projectMemory: input.snapshot.projectMemory ?? "", agents: input.snapshot.participants.map((participant) => ({ name: participant.name, agent: participant.agent, state: participant.state, capabilities: participant.capabilities ?? [] })), currentTasks: input.snapshot.tasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).map((task) => ({ title: task.title, status: task.status, requiredCapabilities: task.requiredCapabilities, dependencies: task.dependencies })) }, null, 2);
-    return this.adapter.planProject({ request: input.request, workingDirectory: this.workingDirectory, projectContext }) as Promise<AgentPlan>;
+    const orchestrator = input.snapshot.participants.find((participant) => participant.role === "ORCHESTRATOR");
+    return this.adapter.planProject({ request: input.request, workingDirectory: this.workingDirectory, projectContext, permissionProfile: orchestrator?.permissionProfile ?? "READ_ONLY" }) as Promise<AgentPlan>;
+  }
+}
+
+export class DirectMessageWorker {
+  constructor(private readonly runner: MirevaRunner, private readonly adapter: AgentAdapter, private readonly workingDirectory: string) {}
+  async runOnce(): Promise<string | undefined> {
+    const events = await this.runner.events();
+    const handled = new Set(events.filter((event) => event.kind === "AGENT_RESPONSE").map((event) => String(event.payload.requestEventId ?? "")));
+    const message = events.find((event) => event.kind === "AGENT_MESSAGE" && event.payload.targetParticipantId === this.runner.config.participantId && !handled.has(event.id) && typeof event.payload.message === "string");
+    if (!message) return undefined;
+    const snapshot = await this.runner.snapshot();
+    const participant = snapshot.participants.find((entry) => entry.id === this.runner.config.participantId);
+    const context = events.filter((event) => ["AGENT_MESSAGE", "AGENT_RESPONSE"].includes(event.kind) && event.payload.targetParticipantId === this.runner.config.participantId).slice(-12).map((event) => `${event.kind === "AGENT_MESSAGE" ? "Responsável" : participant?.name ?? "Agente"}: ${String(event.payload.message ?? "")}`);
+    await this.runner.setPresence("WORKING");
+    const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
+    try {
+      const response = await this.adapter.respondToMessage({ message: String(message.payload.message), workingDirectory: this.workingDirectory, context, permissionProfile: participant?.permissionProfile ?? "PROJECT" });
+      await this.runner.publish("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: response });
+      return message.id;
+    } catch (error: unknown) {
+      await this.runner.publish("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: `Não consegui responder: ${error instanceof Error ? error.message : String(error)}`, error: true });
+      return message.id;
+    } finally { clearInterval(heartbeat); await this.runner.setPresence("AVAILABLE"); }
   }
 }
 
@@ -136,7 +162,8 @@ export class OrchestratorWorker {
       return { requestId: requestEvent.id };
     }
     const conversation = events.filter((event) => ["ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE"].includes(event.kind)).slice(-12).map((event) => event.kind === "ORCHESTRATOR_REQUEST" ? `Responsável: ${String(event.payload.message ?? "")}` : `Orquestrador: ${String((event.payload.orchestrator as { summary?: string } | undefined)?.summary ?? "")}`).join("\n");
-    const contextualRequest = conversation ? `Conversa recente:\n${conversation}\n\nResponda à última mensagem do responsável.` : request;
+    const teamConversation = events.filter((event) => ["AGENT_MESSAGE", "AGENT_RESPONSE"].includes(event.kind)).slice(-10).map((event) => `${event.kind === "AGENT_MESSAGE" ? "Responsável" : "Estação"}: ${String(event.payload.message ?? "")}`).join("\n");
+    const contextualRequest = conversation ? `Conversa recente:\n${conversation}${teamConversation ? `\n\nConversas recentes com as estações:\n${teamConversation}` : ""}\n\nResponda à última mensagem do responsável.` : request;
     await this.runner.setPresence("RESEARCHING");
     // Planning may outlive the Hub's presence timeout while the provider
     // inspects the project. Keep the orchestrator visibly connected.

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLocalHub, type LocalHub } from "../../../apps/hub/src/server.js";
-import { joinRunner, MirevaOrchestrator, MirevaRunner, OrchestratorWorker } from "../src/index.js";
+import { DirectMessageWorker, joinRunner, MirevaOrchestrator, MirevaRunner, OrchestratorWorker } from "../src/index.js";
 import { AgentTaskExecutor, RunnerTaskWorker } from "../src/index.js";
 import { MockAgentAdapter } from "@mireva/agent-adapters";
 
@@ -93,6 +93,16 @@ describe("MirevaRunner", () => {
     const result = await new OrchestratorWorker(runner, new MirevaOrchestrator(runner, planner)).runOnce();
     expect(result.planId).toBeUndefined();
     expect((await runner.snapshot()).plans).toHaveLength(0);
+  });
+  it("delivers a direct message to the selected station", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-direct-message-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Chat", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
+    const owner = new MirevaRunner({ hubUrl: hub.url, roomCode: room.room.code, participantId: room.room.ownerId, name: "Owner", agent: "human", capabilities: [], lastSequence: 0 });
+    const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Runner", "mock"));
+    await owner.publish("AGENT_MESSAGE", { targetParticipantId: runner.config.participantId, message: "Como está a tarefa?" });
+    expect(await new DirectMessageWorker(runner, new MockAgentAdapter(), ".").runOnce()).toBeTruthy();
+    const response = (await owner.events()).find((event) => event.kind === "AGENT_RESPONSE");
+    expect(response?.payload.message).toBe("Mock respondeu: Como está a tarefa?");
   });
   it("dispatches each ready task to an available runner with matching capabilities", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-dispatch-")), "hub.json") });

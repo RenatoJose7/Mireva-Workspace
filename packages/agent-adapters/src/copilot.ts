@@ -1,8 +1,15 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { AgentAdapter, AgentCapability, AdapterAuthentication, AdapterDetection, AgentExecutionEvent, AgentExecutionRequest, AgentExecutionResult, AgentPlan, AgentPlanningRequest, ProjectPlanningAdapter } from "./index.js";
+import type { AgentAdapter, AgentCapability, AgentConversationRequest, AgentPermissionProfile, AdapterAuthentication, AdapterDetection, AgentExecutionEvent, AgentExecutionRequest, AgentExecutionResult, AgentPlan, AgentPlanningRequest, ProjectPlanningAdapter } from "./index.js";
 
 interface Execution { process: ChildProcessWithoutNullStreams; events: AgentExecutionEvent[]; workingDirectory: string; result?: AgentExecutionResult }
 const at = () => new Date().toISOString();
+export const copilotPermissionArgs = (profile: AgentPermissionProfile = "PROJECT"): string[] => {
+  if (profile === "FULL") return ["--allow-all"];
+  const args = ["--allow-all-tools", "--deny-tool=shell(git push)", "--deny-tool=shell(npm publish)", "--deny-tool=shell(pnpm publish)", "--deny-tool=shell(sudo:*)"];
+  if (profile === "READ_ONLY") args.push("--deny-tool=write", "--deny-tool=shell");
+  if (profile === "PROJECT_NETWORK") args.push("--allow-all-urls");
+  return args;
+};
 
 export const buildCopilotPrompt = (request: AgentExecutionRequest): string => [
   "Você está executando uma tarefa do Mireva Workspace no repositório atual.",
@@ -54,15 +61,21 @@ export class CopilotCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     return outcome.code === 0 ? { authenticated: true } : { authenticated: false, reason: outcome.output.trim() || "Copilot CLI não autenticado. Abra 'copilot' uma vez e conclua o login interativo." };
   }
   async getCapabilities(): Promise<AgentCapability[]> { return ["CODE", "RESEARCH", "TEST", "GIT", "CANCEL"]; }
+  async respondToMessage(request: AgentConversationRequest): Promise<string> {
+    const prompt = ["Você está conversando diretamente com o responsável por esta estação no Mireva Workspace.", `Mensagem: ${request.message}`, request.context.length ? `Contexto recente:\n${request.context.join("\n")}` : "", "Responda de forma objetiva. Só altere arquivos quando a mensagem pedir isso explicitamente."].filter(Boolean).join("\n\n");
+    const outcome = await this.run(this.command, ["-s", "-p", prompt, ...copilotPermissionArgs(request.permissionProfile)], request.workingDirectory, 90_000);
+    if (outcome.code !== 0) throw new Error(outcome.output.trim() || `Copilot saiu com código ${outcome.code}`);
+    return outcome.output.trim() || "Concluído.";
+  }
   async planProject(request: AgentPlanningRequest): Promise<AgentPlan> {
-    const outcome = await this.run(this.command, ["-p", buildCopilotPlanningPrompt(request)], request.workingDirectory, 90_000);
+    const outcome = await this.run(this.command, ["-s", "-p", buildCopilotPlanningPrompt(request), ...copilotPermissionArgs(request.permissionProfile ?? "READ_ONLY")], request.workingDirectory, 90_000);
     if (outcome.code !== 0) throw new Error(outcome.output.trim() || `Copilot saiu com código ${outcome.code} ao criar o plano`);
     return parseCopilotPlan(outcome.output);
   }
   async executeTask(request: AgentExecutionRequest): Promise<void> {
     if (this.executions.has(request.taskId)) throw new Error("Task already executing");
     const startedAt = at();
-    const child = spawn(this.command, ["-p", buildCopilotPrompt(request)], { cwd: request.workingDirectory, stdio: "pipe", windowsHide: true });
+    const child = spawn(this.command, ["-s", "-p", buildCopilotPrompt(request), ...copilotPermissionArgs(request.permissionProfile)], { cwd: request.workingDirectory, stdio: "pipe", windowsHide: true });
     const execution: Execution = { process: child, workingDirectory: request.workingDirectory, events: [{ type: "STARTED", message: "GitHub Copilot iniciado", at: startedAt }] };
     this.executions.set(request.taskId, execution);
     child.stdout.on("data", (chunk: Buffer) => this.log(execution, chunk.toString()));

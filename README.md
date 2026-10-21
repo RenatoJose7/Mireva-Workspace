@@ -5,7 +5,7 @@
 Com **Node.js 22+** e **Git** instalados, entre na pasta do projeto que os agentes deverão usar e execute este único comando:
 
 ```powershell
-npx --yes github:RenatoJose7/Mireva-Workspace#main -- setup --office
+npx @renatojose7/mireva setup --office
 ```
 
 Ele baixa o runtime em `~/.mireva/runtime`, instala as dependências, prepara `.mireva` dentro do projeto atual e abre o Office no navegador. Não é necessário instalar o `pnpm` globalmente: o lançador usa a versão correta de forma temporária.
@@ -13,19 +13,19 @@ Ele baixa o runtime em `~/.mireva/runtime`, instala as dependências, prepara `.
 Em outro computador, execute o mesmo comando sem `--office` e conecte o runner à sala:
 
 ```powershell
-npx --yes github:RenatoJose7/Mireva-Workspace#main -- connect 2B7E325E --name "Copilot Frontend" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
+npx @renatojose7/mireva connect 2B7E325E --name "Copilot Frontend" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
 ```
 
 No Office, o botão **Conectar IA** gera esse comando automaticamente depois que você escolhe o nome e a IA. Runners entram como agentes gerais; o orquestrador decide as tarefas compatíveis com as capacidades deles. Cole-o no terminal aberto dentro da pasta do projeto, no computador que será o runner.
 
-O lançador guarda o estado de cada máquina em `.mireva/runner.json`. Para usar mais de um runner na mesma pasta, informe `--state .mireva/nome-do-runner.json`. Quando o pacote for publicado no npm, a mesma experiência passará a usar `npx @renatojose7/mireva` em vez do endereço do GitHub.
+O lançador guarda o estado de cada máquina em `.mireva/runner.json`. Para usar mais de um runner na mesma pasta, informe `--state .mireva/nome-do-runner.json`. Se quiser usar a versão ainda não publicada do repositório, substitua `npx @renatojose7/mireva` por `npx --yes github:RenatoJose7/Mireva-Workspace#main --`.
 
 ### Conexão visual, convites e memória
 
 Abra o Office pelo lançador para iniciar também o **Mireva Agent local**:
 
 ```powershell
-npx --yes github:RenatoJose7/Mireva-Workspace#main -- office
+npx @renatojose7/mireva office
 ```
 
 No botão **Conectar IA**, escolha o agente e a pasta do projeto. Em seguida, **Iniciar nesta máquina** cria o runner e o mantém ativo sem montar um comando manualmente. Marque **orquestrador inicial** apenas para a IA que criará os planos; todos os outros entram como runners gerais. O painel também gera um convite com link e QR Code para computadores na mesma rede; no outro computador, abra o convite e conecte a IA por essa mesma tela.

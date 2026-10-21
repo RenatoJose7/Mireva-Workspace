@@ -31,12 +31,12 @@ function help() {
 Mireva Workspace launcher
 
 Uso:
-  npx --yes github:RenatoJose7/Mireva-Workspace#main -- setup
-  npx --yes github:RenatoJose7/Mireva-Workspace#main -- office
-  npx --yes github:RenatoJose7/Mireva-Workspace#main -- agent
-  npx --yes github:RenatoJose7/Mireva-Workspace#main -- connect CODIGO --name "Copilot" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
-  npx --yes github:RenatoJose7/Mireva-Workspace#main -- join CODIGO --name "Copilot" --agent copilot
-  npx --yes github:RenatoJose7/Mireva-Workspace#main -- work --adapter copilot
+  npx @renatojose7/mireva setup
+  npx @renatojose7/mireva office
+  npx @renatojose7/mireva agent
+  npx @renatojose7/mireva connect CODIGO --name "Copilot" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
+  npx @renatojose7/mireva join CODIGO --name "Copilot" --agent copilot
+  npx @renatojose7/mireva work --adapter copilot
 
 O primeiro comando baixa o runtime em ~/.mireva/runtime e prepara a pasta atual.
 O comando connect entra na sala e mantém o runner trabalhando com um único comando.
@@ -121,7 +121,7 @@ ensureDependencies();
 if (command === "setup") {
   writeProjectConfig();
   console.log(`\nMireva pronto nesta pasta. Runtime: ${runtimeDirectory}`);
-  console.log("Próximo passo: execute `npx --yes github:RenatoJose7/Mireva-Workspace#main -- office` para abrir o escritório.");
+  console.log("Próximo passo: execute `npx @renatojose7/mireva office` para abrir o escritório.");
   if (rawArgs.includes("--office")) openOffice();
   process.exit(0);
 }

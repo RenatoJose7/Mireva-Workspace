@@ -37,6 +37,10 @@ function command(runtime, args, options = {}) {
   return spawn(executable("npx"), ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtime, "--filter", "@mireva/cli", "mireva", ...args], options);
 }
 function runJoin(runtime, input, state) { return new Promise((resolve, reject) => { const child = command(runtime, ["join", input.roomCode, "--hub", input.hub, "--name", input.name, "--agent", input.agent, "--role", input.role, "--capabilities", input.capabilities.join(","), "--state", state], { cwd: input.projectDirectory, stdio: "pipe" }); let error = ""; child.stderr.on("data", (chunk) => { error += chunk; }); child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(error.trim() || "Não foi possível entrar na sala"))); }); }
+function canReuseState(state, input) {
+  try { const saved = JSON.parse(readFileSync(state, "utf8")); return saved.roomCode === input.roomCode && String(saved.hubUrl ?? "").replace(/\/$/, "") === input.hub && Boolean(saved.participantId); }
+  catch { return false; }
+}
 function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, port = agentConfig().port, token = agentConfig().token } = {}) {
   if (!runtimeDirectory) throw new Error("MIREVA_RUNTIME_DIR não informado");
   const sessions = new Map();
@@ -48,7 +52,9 @@ function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, p
       if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { ok: true, sessions: [...sessions.values()].map(({ child, ...session }) => ({ ...session, running: child.exitCode === null })) });
       if (request.method === "POST" && url.pathname === "/connect") {
         const input = valid(await body(request)); const sessionId = randomUUID(); const state = join(input.projectDirectory, ".mireva", `runner-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "agent"}.json`); mkdirSync(dirname(state), { recursive: true });
-        await runJoin(runtimeDirectory, input, state);
+        const activeSession = [...sessions.values()].find((session) => session.name === input.name && session.agent === input.agent && session.projectDirectory === input.projectDirectory && session.child.exitCode === null);
+        if (activeSession) return json(response, 200, { id: activeSession.id, log: activeSession.log, reused: true });
+        if (!canReuseState(state, input)) await runJoin(runtimeDirectory, input, state);
         const log = join(input.projectDirectory, ".mireva", `agent-${sessionId}.log`); const workerCommand = input.role === "ORCHESTRATOR" ? "orchestrate" : "work";
         // spawn() requires a stream to have an open file descriptor. A newly
         // created WriteStream may still have fd=null, so open the log

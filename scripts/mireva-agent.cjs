@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const http = require("node:http");
-const { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
+const { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } = require("node:fs");
 const { randomBytes, randomUUID } = require("node:crypto");
 const { homedir } = require("node:os");
 const { dirname, join, resolve } = require("node:path");
@@ -49,8 +49,15 @@ function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, p
       if (request.method === "POST" && url.pathname === "/connect") {
         const input = valid(await body(request)); const sessionId = randomUUID(); const state = join(input.projectDirectory, ".mireva", `runner-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "agent"}.json`); mkdirSync(dirname(state), { recursive: true });
         await runJoin(runtimeDirectory, input, state);
-        const log = join(input.projectDirectory, ".mireva", `agent-${sessionId}.log`); const logStream = createWriteStream(log, { flags: "a" }); const workerCommand = input.role === "ORCHESTRATOR" ? "orchestrate" : "work";
-        const child = command(runtimeDirectory, [workerCommand, "--state", state, "--adapter", input.agent, "--project-dir", input.projectDirectory], { cwd: input.projectDirectory, detached: true, stdio: ["ignore", logStream, logStream] }); child.unref(); sessions.set(sessionId, { id: sessionId, name: input.name, agent: input.agent, role: input.role, projectDirectory: input.projectDirectory, log, startedAt: new Date().toISOString(), child }); child.on("exit", () => logStream.end());
+        const log = join(input.projectDirectory, ".mireva", `agent-${sessionId}.log`); const workerCommand = input.role === "ORCHESTRATOR" ? "orchestrate" : "work";
+        // spawn() requires a stream to have an open file descriptor. A newly
+        // created WriteStream may still have fd=null, so open the log
+        // synchronously and pass the descriptor directly to the child.
+        const logFd = openSync(log, "a");
+        let child;
+        try { child = command(runtimeDirectory, [workerCommand, "--state", state, "--adapter", input.agent, "--project-dir", input.projectDirectory], { cwd: input.projectDirectory, detached: true, stdio: ["ignore", logFd, logFd] }); }
+        finally { closeSync(logFd); }
+        child.unref(); sessions.set(sessionId, { id: sessionId, name: input.name, agent: input.agent, role: input.role, projectDirectory: input.projectDirectory, log, startedAt: new Date().toISOString(), child });
         return json(response, 201, { id: sessionId, log });
       }
       const stop = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/);

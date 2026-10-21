@@ -84,4 +84,17 @@ describe("local hub", () => {
     const retried = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/retry`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ownerId: created.room.ownerId, permissionProfile: "PROJECT_NETWORK" }) }).then((r) => r.json()) as { status: string; assignedParticipantId: null; permissionProfileOverride: string };
     expect(retried).toMatchObject({ status: "READY", assignedParticipantId: null, permissionProfileOverride: "PROJECT_NETWORK" });
   });
+  it("lets the owner pause a runner, cancel work and return a corrected task to the queue", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mireva-control-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
+    const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Control", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
+    const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Runner", agent: "mock" }) }).then((r) => r.json()) as { id: string };
+    const task = await fetch(`${hub.url}/rooms/${created.room.code}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Ajustar" }) }).then((r) => r.json()) as { id: string };
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id }) });
+    const corrected = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/intervene`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ownerId: created.room.ownerId, message: "Use um texto mais curto" }) }).then((r) => r.json()) as { status: string; description: string };
+    expect(corrected).toMatchObject({ status: "WAITING_APPROVAL" }); expect(corrected.description).toContain("Use um texto mais curto");
+    const cancelled = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ownerId: created.room.ownerId }) }).then((r) => r.json()) as { status: string };
+    expect(cancelled.status).toBe("CANCELLED");
+    const paused = await fetch(`${hub.url}/rooms/${created.room.code}/participants/${runner.id}/pause`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ownerId: created.room.ownerId, paused: true }) }).then((r) => r.json()) as { paused: boolean; state: string };
+    expect(paused).toEqual(expect.objectContaining({ paused: true, state: "BLOCKED" }));
+  });
 });

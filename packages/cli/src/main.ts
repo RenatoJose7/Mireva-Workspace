@@ -2,7 +2,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CodexCliAdapter, CopilotCliAdapter, MockAgentAdapter, isProjectPlanningAdapter, type AgentAdapter } from "@mireva/agent-adapters";
-import { AdapterProjectPlanner, DirectMessageWorker, MirevaOrchestrator, MirevaRunner, OrchestratorWorker, RunnerTaskWorker, joinRunner, type RunnerConfig } from "@mireva/runner";
+import { AdapterProjectPlanner, DirectMessageWorker, GitControlWorker, MirevaOrchestrator, MirevaRunner, OrchestratorWorker, RunnerTaskWorker, joinRunner, type RunnerConfig } from "@mireva/runner";
 type PermissionProfile = "READ_ONLY" | "PROJECT" | "PROJECT_NETWORK" | "FULL";
 
 const args = process.argv.slice(2); const command = args[0];
@@ -43,8 +43,9 @@ async function run(): Promise<void> {
     const recovered = await runner.recover(); if (recovered.length) output({ recovered: recovered.map((task) => task.id), message: "Tarefas interrompidas foram recuperadas" });
     const worker = new RunnerTaskWorker(runner, adapter, projectDirectory());
     const messages = new DirectMessageWorker(runner, adapter, projectDirectory());
+    const git = new GitControlWorker(runner, projectDirectory());
     let running = false;
-    const run = async () => { if (running) return; running = true; try { await runner.heartbeat(); const messageId = await messages.runOnce(); const taskId = messageId ? undefined : await worker.runOnce(); output({ messageId: messageId ?? null, taskId: taskId ?? null, message: messageId ? "Mensagem respondida" : taskId ? "Tarefa entregue para revisão" : "Nenhuma tarefa disponível" }); await saveState(config); } finally { running = false; } };
+    const run = async () => { if (running) return; running = true; try { await runner.heartbeat(); const gitId = await git.runOnce(); const messageId = gitId ? undefined : await messages.runOnce(); const taskId = gitId || messageId ? undefined : await worker.runOnce(); output({ gitId: gitId ?? null, messageId: messageId ?? null, taskId: taskId ?? null, message: gitId ? "Comando Git concluído" : messageId ? "Mensagem respondida" : taskId ? "Tarefa entregue para revisão" : "Nenhuma tarefa disponível" }); await saveState(config); } finally { running = false; } };
     if (args.includes("--once")) return run(); const timer = setInterval(() => void run().catch((error: unknown) => console.error(error)), Number(value("--interval", "3000"))); process.on("SIGINT", () => { clearInterval(timer); void saveState(config).then(() => process.exit(0)); }); return run();
   }
   if (command === "orchestrate") {

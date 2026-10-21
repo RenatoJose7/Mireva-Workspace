@@ -1,5 +1,6 @@
 import type { AgentAdapter, AgentExecutionRequest, AgentPlan, ProjectPlanningAdapter } from "@mireva/agent-adapters";
 import type { AgentRole, AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, PermissionProfile, RoomEvent, RunnerError, Task } from "@mireva/protocol";
+import { spawn } from "node:child_process";
 
 export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; role?: AgentRole; capabilities: string[]; lastSequence: number }
 export interface RunnerCallbacks { onEvent?(event: RoomEvent): void; onError?(error: Error): void }
@@ -77,10 +78,22 @@ export class AgentTaskExecutor {
     await this.runner.updateTask(task.id, "RUNNING", undefined, task.executionId ?? undefined);
     const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
     let finalState: AgentState = "AVAILABLE";
+    let control: "cancel" | "intervene" | undefined;
+    const checkControl = async () => {
+      if (control) return;
+      const events = await this.runner.events();
+      const request = events.find((event) => (event.kind === "TASK_CANCEL_REQUESTED" || event.kind === "TASK_INTERVENTION") && event.payload.taskId === task.id && event.payload.targetParticipantId === this.runner.config.participantId);
+      if (!request) return;
+      control = request.kind === "TASK_CANCEL_REQUESTED" ? "cancel" : "intervene";
+      await this.adapter.cancelTask(task.id);
+    };
     try {
       await this.adapter.executeTask(request);
-      for await (const event of this.adapter.streamEvents(task.id)) await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, event });
+      for await (const event of this.adapter.streamEvents(task.id)) { await checkControl(); await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, event }); }
+      await checkControl();
       const result = await this.adapter.getResult(task.id);
+      if (control === "cancel") return;
+      if (control === "intervene") { await this.runner.updateTask(task.id, "READY", "Correção recebida; aguardando nova atribuição.", task.executionId ?? undefined); return; }
       if (result) await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, delivery: { status: result.status, summary: result.summary, files: result.files, branch: result.branch } });
       if (result?.status === "COMPLETED") await this.runner.updateTask(task.id, "REVIEW", result.summary, task.executionId ?? undefined);
       else throw new Error(result?.summary ?? "O agente não retornou uma entrega");
@@ -102,6 +115,7 @@ export class RunnerTaskWorker {
     const sharedContext = memory ? [...context, `Memória do projeto (siga estas decisões):\n${memory}`] : context;
     const assigned = await this.runner.assignedTasks();
     const participant = snapshot.participants.find((entry) => entry.id === this.runner.config.participantId);
+    if (participant?.paused) return undefined;
     const basePermissionProfile = participant?.permissionProfile ?? "PROJECT";
     for (const task of assigned) { const permissionProfile = task.permissionProfileOverride ?? basePermissionProfile; await new AgentTaskExecutor(this.runner, this.adapter).execute(task, this.workingDirectory, sharedContext, permissionProfile); return task.id; }
     const capabilities = participant?.capabilities ?? this.runner.config.capabilities ?? [];
@@ -149,6 +163,51 @@ export class DirectMessageWorker {
       await this.runner.publish("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: `${failure.title}: ${failure.message}`, error: true });
       return message.id;
     } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState); }
+  }
+}
+
+type GitAction = "STATUS" | "CREATE_BRANCH" | "COMMIT";
+const runGit = async (directory: string, args: string[]): Promise<string> => new Promise((resolve, reject) => {
+  const child = spawn("git", args, { cwd: directory, stdio: ["ignore", "pipe", "pipe"] }); let output = "";
+  child.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); }); child.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.on("error", reject); child.on("close", (code) => code === 0 ? resolve(output.trim()) : reject(new Error(output.trim() || `git terminou com código ${code}`)));
+});
+
+/** Executes only explicit, owner-requested local Git actions. It never pushes or merges. */
+export class GitControlWorker {
+  constructor(private readonly runner: MirevaRunner, private readonly workingDirectory: string) {}
+  async runOnce(): Promise<string | undefined> {
+    const events = await this.runner.events();
+    const handled = new Set(events.filter((event) => event.kind === "GIT_RESPONSE").map((event) => String(event.payload.requestEventId ?? "")));
+    const request = events.find((event) => event.kind === "GIT_COMMAND" && event.payload.targetParticipantId === this.runner.config.participantId && !handled.has(event.id));
+    if (!request) return undefined;
+    const action = String(request.payload.action ?? "") as GitAction;
+    try {
+      if (!["STATUS", "CREATE_BRANCH", "COMMIT"].includes(action)) throw new Error("Ação Git não permitida");
+      await this.runner.setPresence("EXECUTING");
+      let output = "";
+      if (action === "STATUS") {
+        const [branch, status, diff, check] = await Promise.all([runGit(this.workingDirectory, ["branch", "--show-current"]), runGit(this.workingDirectory, ["status", "--short"]), runGit(this.workingDirectory, ["diff", "--stat"]), runGit(this.workingDirectory, ["diff", "--check"])]);
+        output = `Branch: ${branch || "(detached)"}\n\nAlterações:\n${status || "Nenhuma"}\n\nResumo:\n${diff || "Nenhuma"}\n\nVerificação:\n${check || "Sem conflitos de espaço"}`;
+      }
+      if (action === "CREATE_BRANCH") {
+        const branch = String(request.payload.branch ?? "").trim();
+        if (!/^mireva\/[a-z0-9][a-z0-9._/-]{0,70}$/i.test(branch) || branch.includes("..") || branch.endsWith("/")) throw new Error("Use um nome como mireva/landing-home");
+        output = await runGit(this.workingDirectory, ["switch", "-c", branch]);
+      }
+      if (action === "COMMIT") {
+        const message = String(request.payload.message ?? "").trim();
+        if (!message || message.length > 160) throw new Error("Informe uma mensagem de commit de até 160 caracteres");
+        await runGit(this.workingDirectory, ["add", "-A"]); output = await runGit(this.workingDirectory, ["commit", "-m", message]);
+      }
+      const branch = await runGit(this.workingDirectory, ["branch", "--show-current"]);
+      await this.runner.publish("GIT_RESPONSE", { requestEventId: request.id, targetParticipantId: this.runner.config.participantId, action, ok: true, branch, output });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.runner.publish("GIT_RESPONSE", { requestEventId: request.id, targetParticipantId: this.runner.config.participantId, action, ok: false, error: message });
+      await this.runner.publish("RUNNER_ERROR", { ...classifyRunnerError(error, "GIT_CONTROL"), operation: "GIT_CONTROL" });
+    } finally { await this.runner.setPresence("AVAILABLE"); }
+    return request.id;
   }
 }
 

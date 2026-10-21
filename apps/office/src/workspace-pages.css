@@ -87,12 +87,30 @@
 .error-empty { padding: 45px; border: 1px dashed #34415e; border-radius: 14px; text-align: center; }
 .error-empty strong { color: #dce5f8; }
 .error-empty p { color: #8d9bb8; font-size: .67rem; }
+.decision-inbox,.git-control { display: grid; gap: 16px; }
+.inbox-summary { display: grid; grid-template-columns: repeat(4,1fr); gap: 11px; }
+.inbox-summary article,.git-notice { border: 1px solid #2d3957; border-radius: 13px; padding: 15px; background: #111827; }
+.inbox-summary span { display: block; color: #8f9dbb; font-size: .58rem; text-transform: uppercase; letter-spacing: .07em; }
+.inbox-summary strong { display: block; margin-top: 5px; color: #eff3ff; font-size: 1.55rem; }
+.inbox-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.inbox-grid>section,.git-results { min-height: 180px; border: 1px solid #2b3653; border-radius: 15px; padding: 17px; background: rgba(16,22,37,.9); }
+.inbox-grid header h3,.git-results h3 { margin: 4px 0 13px; color: #edf1ff; font-size: .92rem; }
+.decision-item { margin-top: 10px; border: 1px solid #303c5a; border-left: 3px solid #839dff; border-radius: 10px; padding: 12px; background: #0e1525; }
+.decision-item strong { color: #e4eaff; font-size: .69rem; }.decision-item p,.inbox-note,.decision-empty { color: #9eabc6; font-size: .62rem; line-height: 1.5; }
+.decision-item div,.git-runners footer { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.decision-item button,.git-runners button { border: 1px solid #498578; border-radius: 7px; padding: 7px 9px; background: #183d35; color: #c9f7df; font-size: .57rem; font-weight: 800; cursor: pointer; }
+.decision-item button.secondary,.git-runners button.secondary { border-color: #3a4763; background: #151e31; color: #afbdd8; }.decision-item button.danger { border-color: #874653; background: #411f29; color: #ffb0b8; }
+.inbox-events { margin-top: 10px; color: #9eabc6; font-size: .6rem; }.inbox-events p { margin: 7px 0 0; }
+.git-notice { display: flex; align-items: baseline; gap: 14px; border-color: #36536b; background: #102033; }.git-notice strong { color: #b8dfff; font-size: .75rem; }.git-notice p { margin: 0; color: #9fb5cd; font-size: .64rem; }
+.git-runners { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }.git-runners article { display: grid; grid-template-columns: 46px 1fr; gap: 11px; align-items: center; border: 1px solid #2d3957; border-radius: 13px; padding: 14px; background: #111827; }.git-runners img { width: 42px; height: 42px; image-rendering: pixelated; }.git-runners strong,.git-runners span { display: block; }.git-runners strong { color: #e8edfb; font-size: .7rem; }.git-runners span { margin-top: 4px; color: #94a1c0; font-size: .58rem; }.git-runners footer { grid-column: 1/-1; }
+.git-result { margin-top: 10px; border: 1px solid #2f3b58; border-radius: 10px; padding: 12px; background: #0b1220; }.git-result strong,.git-result span { display: block; }.git-result strong { color: #dfe8ff; font-size: .65rem; }.git-result span { margin-top: 3px; color: #8b9ab9; font-size: .55rem; }.git-result pre { max-height: 190px; overflow: auto; margin: 9px 0 0; color: #aebbd7; font: .54rem/1.5 "DM Mono",monospace; white-space: pre-wrap; }.git-result.failure { border-left: 3px solid #f27d8a; }.git-result.success { border-left: 3px solid #55dca2; }
 
 @media(max-width:1000px){
   .workspace-nav { grid-template-columns: 1fr auto; }
   .workspace-nav-links { grid-column: 1/-1; grid-row: 2; justify-content: flex-start; overflow-x: auto; padding-top: 3px; }
   .team-directory-grid { grid-template-columns: repeat(2,1fr); }
   .error-overview { grid-template-columns: repeat(2,1fr); }
+  .inbox-summary { grid-template-columns: repeat(2,1fr); }
 }
 @media(max-width:650px){
   .workspace-nav { top: 5px; gap: 8px; margin-bottom: 20px; }
@@ -101,7 +119,7 @@
   .workspace-nav-links button i { display: none; }
   .workspace-nav .nav-connect { padding: 8px 10px; }
   .page-heading { margin-top: 2px; }
-  .team-directory-grid,.settings-grid { grid-template-columns: 1fr; }
+  .team-directory-grid,.settings-grid,.inbox-grid,.git-runners { grid-template-columns: 1fr; }
   .error-overview,.error-card dl { grid-template-columns: 1fr; }
   .settings-memory { grid-column: auto; }
   .orchestrator-workspace { min-height: 0; border-radius: 16px; }

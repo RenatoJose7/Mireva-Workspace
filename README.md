@@ -43,6 +43,8 @@ Ambiente colaborativo para coordenar agentes de IA que trabalham em clones indep
 - Adaptadores `mock`, `codex` e `copilot`. Os adaptadores Codex e GitHub Copilot chamam o CLI instalado no computador, encaminham os eventos para a sala e mantêm o runner ativo durante a execução.
 - Office web inicial que mostra participantes, tarefas e eventos reais da sala.
 - Central de erros persistente com diagnóstico técnico, tentativa novamente, exportação e liberação de permissão por tarefa ou estação.
+- Caixa de decisões para aprovar planos e entregas, liberar retomadas e cancelar ou corrigir uma tarefa em execução.
+- Controle Git explícito por estação: consultar alterações, criar branch `mireva/...` e criar commit local. O Mireva não faz `push` ou `merge` automaticamente.
 
 ## Erros, recuperação e permissões
 
@@ -51,6 +53,12 @@ O menu **Erros** reúne falhas de autenticação, rede, limite do provedor, ferr
 O launcher mantém a configuração dos runners em `~/.mireva/sessions.json` e os logs dentro de `.mireva` no projeto. Se um processo encerrar inesperadamente, ele tenta reiniciar até cinco vezes com intervalos progressivos. Depois que o computador reiniciar, abrir o Mireva novamente restaura as sessões salvas. O Hub devolve tarefas abandonadas à fila e usa uma identificação por execução para não aceitar uma entrega atrasada de outra tentativa.
 
 Os estados visuais distinguem quando a IA está pensando, executando comandos, aguardando permissão ou login, sem internet, limitada pelo provedor, bloqueada ou desconectada. Publicação e comandos administrativos continuam bloqueados nos perfis normais.
+
+## Decisões, intervenção e Git
+
+Use o menu **Decisões** para centralizar o que precisa de uma ação humana: plano proposto, entrega em revisão, permissão pendente e tarefa em andamento. Em uma tarefa ativa, **Enviar correção** interrompe a execução atual e devolve a tarefa para a fila com sua instrução anexada. **Cancelar** encerra a tarefa, mas não apaga arquivos que a IA já tenha alterado.
+
+No menu **Git**, cada runner de desenvolvimento pode receber três comandos explícitos: ver alterações, criar uma branch com prefixo `mireva/` e criar um commit local. A pausa da estação impede novas atribuições depois da tarefa atual. Push, merge e resolução automática de conflitos continuam fora do fluxo para manter a decisão humana.
 
 ## Hub público com Cloudflare
 

@@ -27,11 +27,11 @@ export type Room = z.infer<typeof roomSchema>;
 
 export const participantSchema = z.object({
   id: z.string(), roomId: z.string(), name: z.string(), agent: z.string(), state: agentStateSchema,
-  role: agentRoleSchema.default("GENERAL"), capabilities: z.array(z.string()).default([]), permissionProfile: permissionProfileSchema.default("PROJECT"), usage: providerUsageSchema.nullable().default(null), joinedAt: z.string(), lastSeenAt: z.string(),
+  role: agentRoleSchema.default("GENERAL"), capabilities: z.array(z.string()).default([]), permissionProfile: permissionProfileSchema.default("PROJECT"), paused: z.boolean().default(false), usage: providerUsageSchema.nullable().default(null), joinedAt: z.string(), lastSeenAt: z.string(),
 });
 export type Participant = z.infer<typeof participantSchema>;
 
-export const eventKindSchema = z.enum(["PARTICIPANT_JOINED", "PARTICIPANT_CONFIGURED", "USAGE_REPORTED", "PRESENCE", "MESSAGE", "AGENT_MESSAGE", "AGENT_RESPONSE", "TASK_CREATED", "TASK_UPDATED", "DECISION_REQUESTED", "ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE", "PLAN_CREATED", "PROJECT_MEMORY_UPDATED", "RUNNER_ERROR", "RUNNER_RECOVERED", "DIAGNOSTIC_REPORTED", "PERMISSION_REQUESTED", "PERMISSION_GRANTED"]);
+export const eventKindSchema = z.enum(["PARTICIPANT_JOINED", "PARTICIPANT_CONFIGURED", "USAGE_REPORTED", "PRESENCE", "MESSAGE", "AGENT_MESSAGE", "AGENT_RESPONSE", "TASK_CREATED", "TASK_UPDATED", "DECISION_REQUESTED", "ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE", "PLAN_CREATED", "PROJECT_MEMORY_UPDATED", "RUNNER_ERROR", "RUNNER_RECOVERED", "DIAGNOSTIC_REPORTED", "PERMISSION_REQUESTED", "PERMISSION_GRANTED", "TASK_CANCEL_REQUESTED", "TASK_INTERVENTION", "RUNNER_PAUSED", "GIT_COMMAND", "GIT_RESPONSE"]);
 export type EventKind = z.infer<typeof eventKindSchema>;
 export const eventSchema = z.object({
   id: z.string(), roomId: z.string(), sequence: z.number().int().positive(), kind: eventKindSchema,
@@ -67,6 +67,9 @@ export const claimTaskSchema = z.object({ participantId: z.string().uuid() });
 export const updateTaskSchema = z.object({ participantId: z.string().uuid(), status: taskStatusSchema, result: z.string().max(20_000).optional(), executionId: z.string().uuid().optional() });
 export const reviewTaskSchema = z.object({ ownerId: z.string().uuid(), status: z.enum(["DONE", "WAITING_APPROVAL"]), result: z.string().max(20_000).optional() });
 export const retryTaskSchema = z.object({ ownerId: z.string().uuid(), permissionProfile: permissionProfileSchema.nullable().optional() });
+export const cancelTaskSchema = z.object({ ownerId: z.string().uuid(), reason: z.string().max(4_000).optional() });
+export const interveneTaskSchema = z.object({ ownerId: z.string().uuid(), message: z.string().min(1).max(8_000) });
+export const pauseParticipantSchema = z.object({ ownerId: z.string().uuid(), paused: z.boolean() });
 
 export const runnerErrorSchema = z.object({
   code: z.string().min(1).max(80), title: z.string().min(1).max(160), message: z.string().min(1).max(20_000),

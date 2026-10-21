@@ -13,4 +13,7 @@ describe("CopilotCliAdapter", () => {
     expect(plan.tasks[1]).toMatchObject({ dependencies: [0], requiredCapabilities: ["CODE"] });
     expect(buildCopilotPlanningPrompt({ request: "Criar app", workingDirectory: ".", projectContext: "Agentes: []" })).toContain("SOMENTE com JSON válido");
   });
+  it("accepts a conversational reply without tasks", () => {
+    expect(parseCopilotPlan('{"summary":"Qual público você quer atender?","tasks":[]}')).toEqual({ summary: "Qual público você quer atender?", tasks: [] });
+  });
 });

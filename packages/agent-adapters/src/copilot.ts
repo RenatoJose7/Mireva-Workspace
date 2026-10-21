@@ -13,12 +13,12 @@ export const buildCopilotPrompt = (request: AgentExecutionRequest): string => [
 ].filter(Boolean).join("\n\n");
 
 export const buildCopilotPlanningPrompt = (request: AgentPlanningRequest): string => [
-  "Você é o orquestrador de tarefas do Mireva Workspace. Não altere arquivos, não instale dependências e não execute comandos que modifiquem o projeto. Você pode inspecionar arquivos e executar apenas comandos de leitura para entender o repositório antes de planejar.",
+  "Você é o orquestrador de tarefas do Mireva Workspace e está conversando com o responsável pelo projeto. Não altere arquivos, não instale dependências e não execute comandos que modifiquem o projeto. Só inspecione arquivos quando isso realmente ajudar a responder ou planejar.",
   `Pedido do responsável:\n${request.request}`,
   `Estado atual do projeto e dos agentes:\n${request.projectContext}`,
   "Responda SOMENTE com JSON válido, sem Markdown, usando exatamente este formato:",
   '{"summary":"resumo curto","tasks":[{"title":"título","description":"instruções objetivas","dependencies":[0],"priority":50,"requiredCapabilities":["CODE"],"acceptanceCriteria":["critério verificável"]}]}',
-  "Crie entre 1 e 30 tarefas pequenas e executáveis. dependencies usa índices de tarefas anteriores; use [] quando não houver dependência. requiredCapabilities deve usar apenas capacidades que existam entre os agentes conectados quando possível."
+  "Se a mensagem for uma saudação, pergunta, ideia incompleta ou ainda exigir decisões do responsável, responda naturalmente em summary, faça no máximo 3 perguntas objetivas e retorne tasks: []. Só crie tarefas quando houver informação suficiente ou quando o responsável pedir para montar o plano. Nesse caso, crie entre 1 e 30 tarefas pequenas e executáveis. dependencies usa índices de tarefas anteriores; use [] quando não houver dependência. requiredCapabilities deve usar apenas capacidades que existam entre os agentes conectados quando possível."
 ].join("\n\n");
 
 export const parseAgentPlan = (output: string): AgentPlan => {
@@ -29,7 +29,7 @@ export const parseAgentPlan = (output: string): AgentPlan => {
   try { parsed = JSON.parse(json); } catch { throw new Error("O Copilot não retornou um plano JSON válido"); }
   if (!parsed || typeof parsed !== "object") throw new Error("O Copilot retornou um plano inválido");
   const value = parsed as { summary?: unknown; tasks?: unknown };
-  if (typeof value.summary !== "string" || !Array.isArray(value.tasks) || value.tasks.length < 1 || value.tasks.length > 30) throw new Error("O plano do Copilot precisa ter um resumo e entre 1 e 30 tarefas");
+  if (typeof value.summary !== "string" || !value.summary.trim() || !Array.isArray(value.tasks) || value.tasks.length > 30) throw new Error("A resposta do Copilot precisa ter um resumo e no máximo 30 tarefas");
   const tasks = value.tasks.map((task, index) => {
     if (!task || typeof task !== "object") throw new Error(`Tarefa ${index + 1} inválida no plano do Copilot`);
     const item = task as Record<string, unknown>; const dependencies = Array.isArray(item.dependencies) ? item.dependencies : [];
@@ -55,7 +55,7 @@ export class CopilotCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
   }
   async getCapabilities(): Promise<AgentCapability[]> { return ["CODE", "RESEARCH", "TEST", "GIT", "CANCEL"]; }
   async planProject(request: AgentPlanningRequest): Promise<AgentPlan> {
-    const outcome = await this.run(this.command, ["-p", buildCopilotPlanningPrompt(request)], request.workingDirectory);
+    const outcome = await this.run(this.command, ["-p", buildCopilotPlanningPrompt(request)], request.workingDirectory, 90_000);
     if (outcome.code !== 0) throw new Error(outcome.output.trim() || `Copilot saiu com código ${outcome.code} ao criar o plano`);
     return parseCopilotPlan(outcome.output);
   }
@@ -87,5 +87,5 @@ export class CopilotCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     const [branch, status] = await Promise.all([this.run("git", ["-C", workingDirectory, "branch", "--show-current"]), this.run("git", ["-C", workingDirectory, "status", "--short"])]);
     return { branch: branch.code === 0 ? branch.output.trim() || undefined : undefined, files: status.code === 0 ? status.output.split("\n").filter(Boolean).map((line) => line.slice(3).trim()).filter(Boolean) : [] };
   }
-  private run(command: string, args: string[], cwd?: string): Promise<{ code: number | null; output: string }> { return new Promise((resolve) => { const child = spawn(command, args, { cwd, stdio: "pipe", windowsHide: true }); let output = ""; child.stdout.on("data", (chunk: Buffer) => output += chunk); child.stderr.on("data", (chunk: Buffer) => output += chunk); child.on("error", () => resolve({ code: 1, output })); child.on("close", (code) => resolve({ code, output })); }); }
+  private run(command: string, args: string[], cwd?: string, timeoutMs?: number): Promise<{ code: number | null; output: string }> { return new Promise((resolve) => { const child = spawn(command, args, { cwd, stdio: "pipe", windowsHide: true }); let output = ""; let settled = false; const finish = (code: number | null) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); resolve({ code, output }); }; const timer = timeoutMs ? setTimeout(() => { output += `\nTempo limite de ${Math.round(timeoutMs / 1_000)} segundos excedido.`; child.kill(); finish(124); }, timeoutMs) : undefined; child.stdout.on("data", (chunk: Buffer) => output += chunk); child.stderr.on("data", (chunk: Buffer) => output += chunk); child.on("error", () => finish(1)); child.on("close", finish); }); }
 }

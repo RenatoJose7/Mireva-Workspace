@@ -108,12 +108,18 @@ export class AdapterProjectPlanner implements ProjectPlanner {
 
 export class MirevaOrchestrator {
   constructor(private readonly runner: MirevaRunner, private readonly planner: ProjectPlanner) {}
-  async planAndPropose(request: string): Promise<OrchestrationPlanRecord> {
+  async respond(request: string, originalRequest = request): Promise<{ summary: string; plan?: OrchestrationPlanRecord }> {
     const plan = await this.planner.plan({ request, snapshot: await this.runner.snapshot() });
     for (const [index, item] of plan.tasks.entries()) {
       if (!item.title.trim() || !item.dependencies.every((dependency) => Number.isInteger(dependency) && dependency >= 0 && dependency < index)) throw new Error(`Plano inválido na tarefa ${index + 1}`);
     }
-    return this.runner.createPlan({ request, summary: plan.summary, tasks: plan.tasks.map((item) => ({ ...item, priority: item.priority ?? 50, requiredCapabilities: item.requiredCapabilities ?? [], acceptanceCriteria: item.acceptanceCriteria ?? [] })) });
+    if (!plan.tasks.length) return { summary: plan.summary };
+    return { summary: plan.summary, plan: await this.runner.createPlan({ request: originalRequest, summary: plan.summary, tasks: plan.tasks.map((item) => ({ ...item, priority: item.priority ?? 50, requiredCapabilities: item.requiredCapabilities ?? [], acceptanceCriteria: item.acceptanceCriteria ?? [] })) }) };
+  }
+  async planAndPropose(request: string): Promise<OrchestrationPlanRecord> {
+    const response = await this.respond(request);
+    if (!response.plan) throw new Error("O orquestrador precisa de mais informações antes de criar o plano");
+    return response.plan;
   }
 }
 
@@ -125,17 +131,23 @@ export class OrchestratorWorker {
     const requestEvent = events.find((event) => event.kind === "ORCHESTRATOR_REQUEST" && !handled.has(event.id) && typeof event.payload.message === "string" && event.payload.message.trim());
     if (!requestEvent) return {};
     const request = String(requestEvent.payload.message).trim();
+    if (/^(oi|olá|ola|eai|e aí|bom dia|boa tarde|boa noite)[!.?\s]*$/i.test(request)) {
+      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: "Olá! Vamos planejar juntos. Me conte o que você quer construir, para quem é o projeto e qual resultado espera alcançar." } });
+      return { requestId: requestEvent.id };
+    }
+    const conversation = events.filter((event) => ["ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE"].includes(event.kind)).slice(-12).map((event) => event.kind === "ORCHESTRATOR_REQUEST" ? `Responsável: ${String(event.payload.message ?? "")}` : `Orquestrador: ${String((event.payload.orchestrator as { summary?: string } | undefined)?.summary ?? "")}`).join("\n");
+    const contextualRequest = conversation ? `Conversa recente:\n${conversation}\n\nResponda à última mensagem do responsável.` : request;
     await this.runner.setPresence("RESEARCHING");
     // Planning may outlive the Hub's presence timeout while the provider
     // inspects the project. Keep the orchestrator visibly connected.
     const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
     try {
-      const plan = await this.orchestrator.planAndPropose(request);
-      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: plan.summary, planId: plan.id, taskCount: plan.tasks.length } });
-      return { requestId: requestEvent.id, planId: plan.id };
+      const response = await this.orchestrator.respond(contextualRequest, request);
+      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: response.summary, planId: response.plan?.id, taskCount: response.plan?.tasks.length ?? 0 } });
+      return { requestId: requestEvent.id, planId: response.plan?.id };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: `Não foi possível criar o plano: ${message}`, error: true } });
+      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: `Não foi possível responder: ${message}`, error: true } });
       return { requestId: requestEvent.id, error: message };
     } finally { clearInterval(heartbeat); await this.runner.setPresence("AVAILABLE"); }
   }

@@ -71,6 +71,29 @@ describe("MirevaRunner", () => {
     await owner.decidePlan(snapshot.plans[0]!.id, "APPROVED");
     expect((await runner.snapshot()).tasks[0]?.requiredCapabilities).toEqual(["CODE"]);
   });
+  it("answers a greeting immediately without invoking the planner", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-orchestrator-chat-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Conversa", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
+    const owner = new MirevaRunner({ hubUrl: hub.url, roomCode: room.room.code, participantId: room.room.ownerId, name: "Owner", agent: "human", capabilities: [], lastSequence: 0 });
+    const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Orchestrator", "codex"));
+    await owner.publish("ORCHESTRATOR_REQUEST", { message: "olá" });
+    const planner = { plan: async () => { throw new Error("planner should not run"); } };
+    expect((await new OrchestratorWorker(runner, new MirevaOrchestrator(runner, planner)).runOnce()).requestId).toBeTruthy();
+    const response = (await runner.events()).find((event) => event.kind === "ORCHESTRATOR_RESPONSE");
+    expect((response?.payload.orchestrator as { summary?: string }).summary).toContain("Vamos planejar juntos");
+    expect((await runner.snapshot()).plans).toHaveLength(0);
+  });
+  it("continues the conversation when more information is needed", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-orchestrator-question-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Perguntas", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
+    const owner = new MirevaRunner({ hubUrl: hub.url, roomCode: room.room.code, participantId: room.room.ownerId, name: "Owner", agent: "human", capabilities: [], lastSequence: 0 });
+    const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Orchestrator", "codex"));
+    await owner.publish("ORCHESTRATOR_REQUEST", { message: "Quero fazer um site" });
+    const planner = { plan: async () => ({ summary: "Que tipo de site e para qual público?", tasks: [] }) };
+    const result = await new OrchestratorWorker(runner, new MirevaOrchestrator(runner, planner)).runOnce();
+    expect(result.planId).toBeUndefined();
+    expect((await runner.snapshot()).plans).toHaveLength(0);
+  });
   it("dispatches each ready task to an available runner with matching capabilities", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-dispatch-")), "hub.json") });
     const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Dispatch", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };

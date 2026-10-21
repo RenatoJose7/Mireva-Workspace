@@ -5,18 +5,14 @@
 Com **Node.js 22+** e **Git** instalados, entre na pasta do projeto que os agentes deverão usar e execute este único comando:
 
 ```powershell
-npx @renatojose7/mireva setup --office
+npx @renatojose7/mireva
 ```
 
-Ele baixa o runtime em `~/.mireva/runtime`, instala as dependências, prepara `.mireva` dentro do projeto atual e abre o Office no navegador. Não é necessário instalar o `pnpm` globalmente: o lançador usa a versão correta de forma temporária.
+Ele baixa o runtime em `~/.mireva/runtime`, instala as dependências, prepara `.mireva` dentro do projeto atual e abre o Office no navegador. Na tela inicial, escolha **Criar escritório** ou **Entrar em um escritório**; o Hub já vem configurado. Não é necessário instalar o `pnpm` globalmente: o lançador usa a versão correta de forma temporária.
 
-Em outro computador, execute o mesmo comando sem `--office` e conecte o runner à sala:
+Em outro computador, entre na pasta do mesmo projeto e execute o mesmo comando. Depois, abra o convite ou digite o código da sala e clique em **Conectar IA**. O botão inicia o runner nessa máquina.
 
-```powershell
-npx @renatojose7/mireva connect 2B7E325E --name "Copilot Frontend" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
-```
-
-No Office, o botão **Conectar IA** gera esse comando automaticamente depois que você escolhe o nome e a IA. Runners entram como agentes gerais; o orquestrador decide as tarefas compatíveis com as capacidades deles. Cole-o no terminal aberto dentro da pasta do projeto, no computador que será o runner.
+Runners entram como agentes gerais; o orquestrador decide as tarefas compatíveis com as capacidades deles. A alternativa de terminal continua disponível dentro da tela de conexão para casos avançados.
 
 O lançador guarda o estado de cada máquina em `.mireva/runner.json`. Para usar mais de um runner na mesma pasta, informe `--state .mireva/nome-do-runner.json`. Se quiser usar a versão ainda não publicada do repositório, substitua `npx @renatojose7/mireva` por `npx --yes github:RenatoJose7/Mireva-Workspace#main --`.
 

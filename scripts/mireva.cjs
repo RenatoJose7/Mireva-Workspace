@@ -16,7 +16,10 @@ const projectDirectory = process.cwd();
 const rawArgs = process.argv.slice(2);
 // npm exec/npx keeps the argument separator when a package is invoked from Git.
 if (rawArgs[0] === "--") rawArgs.shift();
-const command = rawArgs.shift() ?? "setup";
+// Running `npx @renatojose7/mireva` is intentionally the simple path. It
+// prepares the current project and opens the guided Office instead of making
+// people learn the setup/office distinction before they can create a room.
+const command = rawArgs.shift() ?? "open";
 
 function fail(message) { console.error(`\nMireva: ${message}`); process.exit(1); }
 function executable(name) { return process.platform === "win32" ? `${name}.cmd` : name; }
@@ -31,6 +34,8 @@ function help() {
 Mireva Workspace launcher
 
 Uso:
+  npx @renatojose7/mireva
+  npx @renatojose7/mireva open
   npx @renatojose7/mireva setup
   npx @renatojose7/mireva office
   npx @renatojose7/mireva agent
@@ -38,7 +43,7 @@ Uso:
   npx @renatojose7/mireva join CODIGO --name "Copilot" --agent copilot
   npx @renatojose7/mireva work --adapter copilot
 
-O primeiro comando baixa o runtime em ~/.mireva/runtime e prepara a pasta atual.
+O primeiro comando baixa o runtime, prepara a pasta atual e abre o Office.
 O comando connect entra na sala e mantém o runner trabalhando com um único comando.
 Os comandos seguintes usam .mireva/runner.json da pasta atual. Use --state para outro runner.
 `);
@@ -114,15 +119,15 @@ function runConnect(suppliedArgs) {
 
 if (["--help", "-h", "help"].includes(command)) { help(); process.exit(0); }
 checkNode();
-const update = command === "setup" && !rawArgs.includes("--no-update");
+const update = ["setup", "open"].includes(command) && !rawArgs.includes("--no-update");
 syncRuntime(update);
 ensureDependencies();
 
-if (command === "setup") {
+if (command === "setup" || command === "open") {
   writeProjectConfig();
   console.log(`\nMireva pronto nesta pasta. Runtime: ${runtimeDirectory}`);
-  console.log("Próximo passo: execute `npx @renatojose7/mireva office` para abrir o escritório.");
-  if (rawArgs.includes("--office")) openOffice();
+  if (command === "open" || rawArgs.includes("--office")) openOffice();
+  else console.log("Próximo passo: execute `npx @renatojose7/mireva` para abrir o escritório.");
   process.exit(0);
 }
 if (command === "office") {

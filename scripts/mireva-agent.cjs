@@ -7,6 +7,7 @@ const { dirname, join, resolve } = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 
 const DEFAULT_HUB = "https://mireva-hub.renatojosesfc.workers.dev";
+const PNPM_VERSION = "11.25.0";
 const configFile = () => join(process.env.MIREVA_HOME || join(homedir(), ".mireva"), "agent.json");
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 function agentConfig() {
@@ -28,7 +29,13 @@ function valid(input) {
   if (!existsSync(projectDirectory)) throw new Error("A pasta do projeto não existe neste computador");
   return { roomCode: input.roomCode.toUpperCase(), hub: String(input.hub || DEFAULT_HUB).replace(/\/$/, ""), name: input.name.trim(), agent: input.agent, role: input.role, capabilities: Array.isArray(input.capabilities) ? input.capabilities.map(String).map((value) => value.trim().toUpperCase()).filter(Boolean).slice(0, 12) : [], projectDirectory };
 }
-function command(runtime, args, options = {}) { return spawn(executable(join(runtime, "node_modules", ".bin", "pnpm")), ["--filter", "@mireva/cli", "mireva", ...args], options); }
+// The runtime uses Corepack/npx to install dependencies, which does not place a
+// `pnpm` executable in its node_modules/.bin directory. Invoke the pinned
+// package manager through npx as well, so a fresh installation can start a
+// runner without a separate global pnpm install.
+function command(runtime, args, options = {}) {
+  return spawn(executable("npx"), ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtime, "--filter", "@mireva/cli", "mireva", ...args], options);
+}
 function runJoin(runtime, input, state) { return new Promise((resolve, reject) => { const child = command(runtime, ["join", input.roomCode, "--hub", input.hub, "--name", input.name, "--agent", input.agent, "--role", input.role, "--capabilities", input.capabilities.join(","), "--state", state], { cwd: input.projectDirectory, stdio: "pipe" }); let error = ""; child.stderr.on("data", (chunk) => { error += chunk; }); child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(error.trim() || "Não foi possível entrar na sala"))); }); }
 function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, port = agentConfig().port, token = agentConfig().token } = {}) {
   if (!runtimeDirectory) throw new Error("MIREVA_RUNTIME_DIR não informado");

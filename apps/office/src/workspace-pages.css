@@ -60,11 +60,39 @@
 .settings-actions button.secondary { border-color: #3b4865; background: #151e31; color: #aebad3; }
 .settings-memory { grid-column: 1/-1; }
 .settings-memory .project-memory { margin-bottom: 0; }
+.error-center { display: grid; gap: 16px; }
+.error-overview { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)) auto; gap: 11px; }
+.error-overview article,.error-overview>button { min-height: 105px; border: 1px solid #2d3957; border-radius: 13px; padding: 16px; background: #111827; }
+.error-overview article span,.error-overview article small { display: block; color: #8f9dbb; font-size: .59rem; }
+.error-overview article strong { display: block; margin: 7px 0 4px; color: #eef2ff; font-size: 1.5rem; }
+.error-overview>button { color: #d8e4ff; font-size: .66rem; font-weight: 800; cursor: pointer; }
+.error-list { display: grid; gap: 12px; }
+.error-card { border: 1px solid #3e344c; border-left: 3px solid #ff7482; border-radius: 13px; padding: 17px; background: #121827; box-shadow: 0 14px 35px rgba(0,0,0,.16); }
+.error-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.error-card header span { color: #ff9aa4; font: 600 .53rem "DM Mono",monospace; letter-spacing: .08em; }
+.error-card h3 { margin: 3px 0 0; color: #eef2ff; font-size: .88rem; }
+.error-card time { color: #7583a2; font: 500 .54rem "DM Mono",monospace; }
+.error-card>p { color: #b4bfd7; font-size: .67rem; line-height: 1.55; }
+.error-card dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; margin: 13px 0; }
+.error-card dl div { padding: 9px; border: 1px solid #2b3853; border-radius: 8px; background: #0d1422; }
+.error-card dt { color: #7887a7; font: 500 .49rem "DM Mono",monospace; text-transform: uppercase; }
+.error-card dd { margin: 3px 0 0; color: #cbd5ec; font-size: .6rem; line-height: 1.4; }
+.error-card details { border-top: 1px solid #29344d; padding-top: 10px; }
+.error-card summary { color: #91a2c5; font-size: .59rem; cursor: pointer; }
+.error-card pre { max-height: 220px; overflow: auto; border-radius: 8px; padding: 11px; background: #090e18; color: #abb9d5; font: .55rem/1.5 "DM Mono",monospace; white-space: pre-wrap; }
+.error-card footer { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.error-card footer button { border: 1px solid #498578; border-radius: 7px; padding: 8px 10px; background: #183d35; color: #c9f7df; font-size: .58rem; font-weight: 800; cursor: pointer; }
+.error-card footer button.secondary { border-color: #3a4763; background: #151e31; color: #afbdd8; }
+.error-card footer button.warning { border-color: #755f38; background: #3d321d; color: #ffda8e; }
+.error-empty { padding: 45px; border: 1px dashed #34415e; border-radius: 14px; text-align: center; }
+.error-empty strong { color: #dce5f8; }
+.error-empty p { color: #8d9bb8; font-size: .67rem; }
 
 @media(max-width:1000px){
   .workspace-nav { grid-template-columns: 1fr auto; }
   .workspace-nav-links { grid-column: 1/-1; grid-row: 2; justify-content: flex-start; overflow-x: auto; padding-top: 3px; }
   .team-directory-grid { grid-template-columns: repeat(2,1fr); }
+  .error-overview { grid-template-columns: repeat(2,1fr); }
 }
 @media(max-width:650px){
   .workspace-nav { top: 5px; gap: 8px; margin-bottom: 20px; }
@@ -74,6 +102,7 @@
   .workspace-nav .nav-connect { padding: 8px 10px; }
   .page-heading { margin-top: 2px; }
   .team-directory-grid,.settings-grid { grid-template-columns: 1fr; }
+  .error-overview,.error-card dl { grid-template-columns: 1fr; }
   .settings-memory { grid-column: auto; }
   .orchestrator-workspace { min-height: 0; border-radius: 16px; }
   .orchestrator-layout { min-height: 560px; }

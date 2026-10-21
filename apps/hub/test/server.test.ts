@@ -37,10 +37,13 @@ describe("local hub", () => {
     const dir = await mkdtemp(join(tmpdir(), "mireva-presence-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
     const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Presence", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
     const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Runner", agent: "mock" }) }).then((r) => r.json()) as { id: string };
+    const task = await fetch(`${hub.url}/rooms/${created.room.code}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Interrompida" }) }).then((r) => r.json()) as { id: string };
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id }) });
     const raw = (hub.store as unknown as { data: { rooms: Record<string, { participants: Array<{ id: string; lastSeenAt: string }> }> } }).data;
     raw.rooms[created.room.code]!.participants.find((entry) => entry.id === runner.id)!.lastSeenAt = new Date(Date.now() - 21_000).toISOString();
-    const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; state: string }> };
+    const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; state: string }>; tasks: Array<{ id: string; status: string; assignedParticipantId: string | null }> };
     expect(snapshot.participants.find((entry) => entry.id === runner.id)?.state).toBe("DISCONNECTED");
+    expect(snapshot.tasks.find((entry) => entry.id === task.id)).toMatchObject({ status: "READY", assignedParticipantId: null });
   });
   it("lets the room owner configure a runner role and capabilities", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mireva-roles-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
@@ -69,5 +72,16 @@ describe("local hub", () => {
     await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id, status: "REVIEW" }) });
     const decision = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/decision`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ownerId: created.room.ownerId, status: "DONE", result: "Aprovada" }) }).then((r) => r.json()) as { status: string; result: string };
     expect(decision).toMatchObject({ status: "DONE", result: "Aprovada" });
+  });
+  it("retries a blocked task with one-task permissions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mireva-retry-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
+    const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Retry", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string; ownerId: string } };
+    const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Runner", agent: "mock" }) }).then((r) => r.json()) as { id: string };
+    const task = await fetch(`${hub.url}/rooms/${created.room.code}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Com rede" }) }).then((r) => r.json()) as { id: string };
+    const claimed = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id }) }).then((r) => r.json()) as { executionId: string };
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id, executionId: claimed.executionId, status: "RUNNING" }) });
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id, executionId: claimed.executionId, status: "WAITING_APPROVAL", result: "Rede bloqueada" }) });
+    const retried = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/retry`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ownerId: created.room.ownerId, permissionProfile: "PROJECT_NETWORK" }) }).then((r) => r.json()) as { status: string; assignedParticipantId: null; permissionProfileOverride: string };
+    expect(retried).toMatchObject({ status: "READY", assignedParticipantId: null, permissionProfileOverride: "PROJECT_NETWORK" });
   });
 });

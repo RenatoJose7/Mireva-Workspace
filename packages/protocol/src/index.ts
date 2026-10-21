@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 export const agentStateSchema = z.enum([
-  "AVAILABLE", "WORKING", "RESEARCHING", "TESTING", "WAITING_APPROVAL", "BLOCKED", "DISCONNECTED",
+  "AVAILABLE", "THINKING", "WORKING", "EXECUTING", "RESEARCHING", "TESTING", "WAITING_PERMISSION",
+  "WAITING_APPROVAL", "AUTH_REQUIRED", "RATE_LIMITED", "NO_NETWORK", "BLOCKED", "DISCONNECTED",
 ]);
 export type AgentState = z.infer<typeof agentStateSchema>;
 export const agentRoleSchema = z.enum(["GENERAL", "ORCHESTRATOR", "DEVELOPMENT", "RESEARCH", "TEST", "REVIEW"]);
@@ -30,7 +31,7 @@ export const participantSchema = z.object({
 });
 export type Participant = z.infer<typeof participantSchema>;
 
-export const eventKindSchema = z.enum(["PARTICIPANT_JOINED", "PARTICIPANT_CONFIGURED", "USAGE_REPORTED", "PRESENCE", "MESSAGE", "AGENT_MESSAGE", "AGENT_RESPONSE", "TASK_CREATED", "TASK_UPDATED", "DECISION_REQUESTED", "ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE", "PLAN_CREATED", "PROJECT_MEMORY_UPDATED"]);
+export const eventKindSchema = z.enum(["PARTICIPANT_JOINED", "PARTICIPANT_CONFIGURED", "USAGE_REPORTED", "PRESENCE", "MESSAGE", "AGENT_MESSAGE", "AGENT_RESPONSE", "TASK_CREATED", "TASK_UPDATED", "DECISION_REQUESTED", "ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE", "PLAN_CREATED", "PROJECT_MEMORY_UPDATED", "RUNNER_ERROR", "RUNNER_RECOVERED", "DIAGNOSTIC_REPORTED", "PERMISSION_REQUESTED", "PERMISSION_GRANTED"]);
 export type EventKind = z.infer<typeof eventKindSchema>;
 export const eventSchema = z.object({
   id: z.string(), roomId: z.string(), sequence: z.number().int().positive(), kind: eventKindSchema,
@@ -42,6 +43,7 @@ export const taskSchema = z.object({
   id: z.string(), roomId: z.string(), title: z.string().min(1), description: z.string(), status: taskStatusSchema,
   dependencies: z.array(z.string()), assignedParticipantId: z.string().nullable(), priority: z.number().int().min(0).max(100),
   requiredCapabilities: z.array(z.string()), acceptanceCriteria: z.array(z.string()), result: z.string().nullable(),
+  executionId: z.string().uuid().nullable().optional(), permissionProfileOverride: permissionProfileSchema.nullable().optional(), lastErrorCode: z.string().nullable().optional(),
   attempts: z.number().int().nonnegative(), maxAttempts: z.number().int().positive(), createdAt: z.string(), updatedAt: z.string(),
 });
 export type Task = z.infer<typeof taskSchema>;
@@ -62,8 +64,16 @@ export const createTaskSchema = z.object({
   acceptanceCriteria: z.array(z.string()).default([]), maxAttempts: z.number().int().positive().max(10).default(3),
 });
 export const claimTaskSchema = z.object({ participantId: z.string().uuid() });
-export const updateTaskSchema = z.object({ participantId: z.string().uuid(), status: taskStatusSchema, result: z.string().max(20_000).optional() });
+export const updateTaskSchema = z.object({ participantId: z.string().uuid(), status: taskStatusSchema, result: z.string().max(20_000).optional(), executionId: z.string().uuid().optional() });
 export const reviewTaskSchema = z.object({ ownerId: z.string().uuid(), status: z.enum(["DONE", "WAITING_APPROVAL"]), result: z.string().max(20_000).optional() });
+export const retryTaskSchema = z.object({ ownerId: z.string().uuid(), permissionProfile: permissionProfileSchema.nullable().optional() });
+
+export const runnerErrorSchema = z.object({
+  code: z.string().min(1).max(80), title: z.string().min(1).max(160), message: z.string().min(1).max(20_000),
+  operation: z.string().min(1).max(120), retryable: z.boolean(), suggestedAction: z.string().min(1).max(500),
+  taskId: z.string().uuid().nullable().default(null), technicalDetails: z.string().max(30_000).default(""), occurredAt: z.string().datetime(),
+});
+export type RunnerError = z.infer<typeof runnerErrorSchema>;
 
 export const createPlanSchema = z.object({ participantId: z.string().uuid(), request: z.string().min(1).max(20_000), summary: z.string().min(1).max(20_000), tasks: z.array(plannedTaskSchema).min(1).max(30) });
 export const decidePlanSchema = z.object({ ownerId: z.string().uuid(), status: z.enum(["APPROVED", "REJECTED"]) });

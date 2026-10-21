@@ -49,7 +49,7 @@ export class LocalHubStore {
   async configureParticipant(code: string, participantId: string, ownerId: string, role: Participant["role"], capabilities: string[], permissionProfile: PermissionProfile): Promise<Participant | undefined> {
     const found = this.data.rooms[code]; if (!found || found.room.ownerId !== ownerId) return undefined;
     const participant = found.participants.find((entry) => entry.id === participantId); if (!participant) return undefined;
-    participant.role = role; participant.capabilities = capabilities; participant.permissionProfile = permissionProfile; await this.append(found, "PARTICIPANT_CONFIGURED", ownerId, { participant }); await this.save(); return structuredClone(participant);
+    participant.role = role; participant.capabilities = capabilities; participant.permissionProfile = permissionProfile; if (["WAITING_PERMISSION", "AUTH_REQUIRED", "RATE_LIMITED", "NO_NETWORK", "BLOCKED"].includes(participant.state)) participant.state = "AVAILABLE"; await this.append(found, "PARTICIPANT_CONFIGURED", ownerId, { participant }); await this.save(); return structuredClone(participant);
   }
   async reportUsage(code: string, participantId: string, reporterId: string, input: Omit<ProviderUsage, "reportedAt">): Promise<Participant | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined;
@@ -91,15 +91,17 @@ export class LocalHubStore {
     const found = this.data.rooms[code]; if (!found) return undefined; found.tasks ??= []; const task = found.tasks.find((entry) => entry.id === taskId);
     if (!task || !found.participants.some((entry) => entry.id === participantId)) return undefined;
     if (task.status !== "READY" || task.assignedParticipantId) throw new Error("Task is not available");
-    task.status = "CLAIMED"; task.assignedParticipantId = participantId; task.attempts += 1; task.updatedAt = now();
+    task.status = "CLAIMED"; task.assignedParticipantId = participantId; task.executionId = randomUUID(); task.attempts += 1; task.updatedAt = now();
     await this.append(found, "TASK_UPDATED", participantId, { task }); await this.save(); return structuredClone(task);
   }
-  async updateTask(code: string, taskId: string, participantId: string, status: Task["status"], result?: string): Promise<Task | undefined> {
+  async updateTask(code: string, taskId: string, participantId: string, status: Task["status"], result?: string, executionId?: string): Promise<Task | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined; found.tasks ??= []; const task = found.tasks.find((entry) => entry.id === taskId);
     if (!task || task.assignedParticipantId !== participantId) return undefined;
+    if (task.executionId && executionId && task.executionId !== executionId) throw new Error("Execution lease expired");
     const allowed: Record<Task["status"], Task["status"][]> = { BACKLOG: [], READY: [], CLAIMED: ["RUNNING", "BLOCKED", "CANCELLED"], RUNNING: ["REVIEW", "FAILED", "BLOCKED", "WAITING_APPROVAL"], REVIEW: ["DONE", "FAILED", "WAITING_APPROVAL"], DONE: [], FAILED: [], BLOCKED: ["READY", "CANCELLED"], CANCELLED: [], WAITING_APPROVAL: ["RUNNING", "REVIEW", "CANCELLED"] };
     if (!allowed[task.status].includes(status)) throw new Error(`Invalid transition: ${task.status} to ${status}`);
     if (status === "FAILED" && task.attempts >= task.maxAttempts) task.status = "BLOCKED"; else task.status = status;
+    if (["REVIEW", "FAILED", "BLOCKED", "CANCELLED"].includes(task.status)) task.executionId = null;
     task.result = result ?? task.result; task.updatedAt = now(); await this.append(found, "TASK_UPDATED", participantId, { task });
     if (task.status === "DONE") for (const candidate of found.tasks) if (candidate.status === "BACKLOG" && candidate.dependencies.every((id) => found.tasks.some((dependency) => dependency.id === id && dependency.status === "DONE"))) { candidate.status = "READY"; candidate.updatedAt = now(); await this.append(found, "TASK_UPDATED", null, { task: candidate }); }
     await this.save(); return structuredClone(task);
@@ -112,6 +114,25 @@ export class LocalHubStore {
     if (task.status === "DONE") for (const candidate of found.tasks) if (candidate.status === "BACKLOG" && candidate.dependencies.every((id) => found.tasks.some((dependency) => dependency.id === id && dependency.status === "DONE"))) { candidate.status = "READY"; candidate.updatedAt = now(); await this.append(found, "TASK_UPDATED", null, { task: candidate }); }
     await this.save(); return structuredClone(task);
   }
+  async retryTask(code: string, taskId: string, ownerId: string, permissionProfile?: PermissionProfile | null): Promise<Task | undefined> {
+    const found = this.data.rooms[code]; if (!found || found.room.ownerId !== ownerId) return undefined; found.tasks ??= [];
+    const task = found.tasks.find((entry) => entry.id === taskId); if (!task) return undefined;
+    if (!["FAILED", "BLOCKED", "WAITING_APPROVAL"].includes(task.status)) throw new Error("Task cannot be retried from its current state");
+    const previousParticipantId = task.assignedParticipantId; task.status = "READY"; task.assignedParticipantId = null; task.executionId = null; task.permissionProfileOverride = permissionProfile ?? task.permissionProfileOverride ?? null; task.lastErrorCode = null; task.maxAttempts = Math.max(task.maxAttempts, task.attempts + 1); task.updatedAt = now();
+    const participant = found.participants.find((entry) => entry.id === previousParticipantId); if (participant && participant.state !== "DISCONNECTED") participant.state = "AVAILABLE";
+    await this.append(found, "TASK_UPDATED", ownerId, { task, retry: true });
+    if (permissionProfile) await this.append(found, "PERMISSION_GRANTED", ownerId, { taskId, permissionProfile, scope: "TASK" });
+    await this.save(); return structuredClone(task);
+  }
+  async recoverParticipantTasks(code: string, participantId: string): Promise<Task[] | undefined> {
+    const found = this.data.rooms[code]; if (!found || !found.participants.some((entry) => entry.id === participantId)) return undefined;
+    const recovered: Task[] = [];
+    for (const task of found.tasks.filter((entry) => entry.assignedParticipantId === participantId && ["CLAIMED", "RUNNING"].includes(entry.status))) {
+      task.status = task.attempts >= task.maxAttempts ? "BLOCKED" : "READY"; task.assignedParticipantId = null; task.executionId = null; task.updatedAt = now(); recovered.push(task);
+      await this.append(found, "RUNNER_RECOVERED", participantId, { taskId: task.id, status: task.status, reason: "RUNNER_RESTARTED" });
+    }
+    if (recovered.length) await this.save(); return structuredClone(recovered);
+  }
   availableTasks(code: string): Task[] | undefined { const found = this.data.rooms[code]; if (!found) return undefined; found.tasks ??= []; return structuredClone(found.tasks.filter((task) => task.status === "READY").sort((a, b) => b.priority - a.priority)); }
   assignedTasks(code: string, participantId: string): Task[] | undefined { const found = this.data.rooms[code]; if (!found || !found.participants.some((participant) => participant.id === participantId)) return undefined; return structuredClone(found.tasks.filter((task) => task.status === "CLAIMED" && task.assignedParticipantId === participantId)); }
   async dispatchTasks(code: string, ownerId: string): Promise<Task[] | undefined> {
@@ -121,7 +142,7 @@ export class LocalHubStore {
     for (const task of found.tasks.filter((entry) => entry.status === "READY").sort((a, b) => b.priority - a.priority)) {
       const candidates = found.participants.filter((participant) => participant.agent !== "human" && participant.state === "AVAILABLE" && task.requiredCapabilities.every((capability) => (participant.capabilities ?? []).includes(capability))).sort((a, b) => load(a.id) - load(b.id) || a.id.localeCompare(b.id));
       const target = candidates[0]; if (!target) continue;
-      task.status = "CLAIMED"; task.assignedParticipantId = target.id; task.attempts += 1; task.updatedAt = now(); assigned.push(task); await this.append(found, "TASK_UPDATED", target.id, { task, dispatch: true });
+      task.status = "CLAIMED"; task.assignedParticipantId = target.id; task.executionId = randomUUID(); task.attempts += 1; task.updatedAt = now(); assigned.push(task); await this.append(found, "TASK_UPDATED", target.id, { task, dispatch: true });
     }
     if (assigned.length) await this.save(); return structuredClone(assigned);
   }
@@ -133,7 +154,7 @@ export class LocalHubStore {
     const cutoff = Date.now() - 20_000; let changed = false;
     room.projectMemory ??= "";
     for (const participant of room.participants) { participant.role ??= "GENERAL"; participant.capabilities ??= []; participant.permissionProfile ??= participant.role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT"; participant.usage ??= null; if (participant.state !== "DISCONNECTED" && Date.parse(participant.lastSeenAt) < cutoff) { participant.state = "DISCONNECTED"; await this.append(room, "PRESENCE", participant.id, { state: "DISCONNECTED" }); changed = true; } }
-    for (const task of room.tasks) if (task.assignedParticipantId && ["CLAIMED", "RUNNING", "REVIEW"].includes(task.status) && room.participants.some((participant) => participant.id === task.assignedParticipantId && participant.state === "DISCONNECTED")) { task.status = "BLOCKED"; task.updatedAt = now(); await this.append(room, "TASK_UPDATED", null, { task, reason: "ASSIGNEE_DISCONNECTED" }); changed = true; }
+    for (const task of room.tasks) if (task.assignedParticipantId && ["CLAIMED", "RUNNING"].includes(task.status) && room.participants.some((participant) => participant.id === task.assignedParticipantId && participant.state === "DISCONNECTED")) { task.status = task.attempts >= task.maxAttempts ? "BLOCKED" : "READY"; task.assignedParticipantId = null; task.executionId = null; task.updatedAt = now(); await this.append(room, "RUNNER_RECOVERED", null, { taskId: task.id, status: task.status, reason: "ASSIGNEE_DISCONNECTED" }); changed = true; }
     if (changed) await this.save();
   }
   private async save(): Promise<void> {

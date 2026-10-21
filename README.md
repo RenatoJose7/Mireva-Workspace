@@ -26,6 +26,8 @@ npx @renatojose7/mireva office
 
 No botão **Conectar IA**, escolha o agente, a pasta do projeto e a permissão inicial. Em seguida, **Iniciar nesta máquina** cria o runner e o mantém ativo sem montar um comando manualmente. Marque **orquestrador inicial** apenas para a IA que criará os planos; todos os outros entram como runners gerais. O painel também gera um convite com link e QR Code para computadores na mesma rede; no outro computador, abra o convite e conecte a IA por essa mesma tela.
 
+Antes de conectar, o Office verifica a pasta, a instalação da IA, o login disponível e a comunicação com o Hub. Os resultados aparecem na própria janela com a correção sugerida para cada item.
+
 Ao selecionar uma estação no escritório, você pode conversar diretamente com aquele agente e alterar sua política entre **Somente leitura**, **Trabalhar no projeto**, **Projeto + internet** e **Acesso ampliado**. O perfil normal autoriza as ferramentas do Copilot dentro do fluxo não interativo, mas continua bloqueando publicação e comandos administrativos conhecidos. O perfil ampliado remove proteções do CLI e deve ser usado apenas em ambiente controlado.
 
 No centro do Orquestrador existe a **Memória do projeto**. Use-a para registrar decisões, tecnologias, regras e objetivos. Ela é enviada ao orquestrador durante o planejamento e aos runners quando executam tarefas.
@@ -35,11 +37,20 @@ Ambiente colaborativo para coordenar agentes de IA que trabalham em clones indep
 ## Estado atual
 
 - Hub remoto no Cloudflare com Durable Objects, salas por código e eventos ordenados.
-- Presença com recuperação: runners inativos aparecem como desconectados e tarefas em execução ficam bloqueadas para revisão humana.
+- Presença com recuperação: runners inativos aparecem como desconectados, o supervisor local tenta reiniciá-los e tarefas interrompidas retornam à fila sem aceitar resultados de uma execução antiga.
 - Tarefas com dependências, prioridade, tentativa, resultado e ciclo `READY → CLAIMED → RUNNING → REVIEW → DONE`.
 - Runner automático: busca, reivindica e executa a próxima tarefa compatível.
 - Adaptadores `mock`, `codex` e `copilot`. Os adaptadores Codex e GitHub Copilot chamam o CLI instalado no computador, encaminham os eventos para a sala e mantêm o runner ativo durante a execução.
 - Office web inicial que mostra participantes, tarefas e eventos reais da sala.
+- Central de erros persistente com diagnóstico técnico, tentativa novamente, exportação e liberação de permissão por tarefa ou estação.
+
+## Erros, recuperação e permissões
+
+O menu **Erros** reúne falhas de autenticação, rede, limite do provedor, ferramenta ausente, tempo excedido e bloqueios de permissão. Cada registro mostra uma explicação simples, a ação recomendada e os detalhes técnicos recolhidos. É possível copiar ou baixar o diagnóstico, tentar a tarefa novamente e, quando necessário, liberar um perfil mais amplo somente para aquela tarefa.
+
+O launcher mantém a configuração dos runners em `~/.mireva/sessions.json` e os logs dentro de `.mireva` no projeto. Se um processo encerrar inesperadamente, ele tenta reiniciar até cinco vezes com intervalos progressivos. Depois que o computador reiniciar, abrir o Mireva novamente restaura as sessões salvas. O Hub devolve tarefas abandonadas à fila e usa uma identificação por execução para não aceitar uma entrega atrasada de outra tentativa.
+
+Os estados visuais distinguem quando a IA está pensando, executando comandos, aguardando permissão ou login, sem internet, limitada pelo provedor, bloqueada ou desconectada. Publicação e comandos administrativos continuam bloqueados nos perfis normais.
 
 ## Hub público com Cloudflare
 

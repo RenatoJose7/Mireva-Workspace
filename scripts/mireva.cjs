@@ -69,7 +69,7 @@ function ensureDependencies() {
 function officeEnvironment() {
   const config = agentConfig();
   const script = join(__dirname, "mireva-agent.cjs");
-  const child = spawn(process.execPath, [script], { detached: true, stdio: "ignore", env: { ...process.env, MIREVA_RUNTIME_DIR: runtimeDirectory } });
+  const child = spawn(process.execPath, [script], { detached: true, stdio: "ignore", env: { ...process.env, MIREVA_RUNTIME_DIR: runtimeDirectory, MIREVA_PROJECT_DIR: projectDirectory } });
   child.unref();
   const localNetwork = Object.values(networkInterfaces()).flat().find((network) => network && network.family === "IPv4" && !network.internal)?.address;
   return { ...process.env, VITE_MIREVA_AGENT_URL: `http://127.0.0.1:${config.port}`, VITE_MIREVA_AGENT_TOKEN: config.token, VITE_MIREVA_PROJECT_DIR: projectDirectory, VITE_MIREVA_INVITE_BASE_URL: localNetwork ? `http://${localNetwork}:5173` : "" };

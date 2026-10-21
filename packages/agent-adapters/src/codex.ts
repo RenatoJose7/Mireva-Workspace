@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AgentAdapter, AgentCapability, AgentConversationRequest, AgentPermissionProfile, AdapterAuthentication, AdapterDetection, AgentExecutionEvent, AgentExecutionRequest, AgentExecutionResult, AgentPlan, AgentPlanningRequest, ProjectPlanningAdapter } from "./index.js";
 import { parseAgentPlan } from "./copilot.js";
 
-interface Execution { process: ChildProcessWithoutNullStreams; events: AgentExecutionEvent[]; workingDirectory: string; result?: AgentExecutionResult }
+interface Execution { process: ChildProcessWithoutNullStreams; events: AgentExecutionEvent[]; workingDirectory: string; timeout?: NodeJS.Timeout; result?: AgentExecutionResult }
 const at = () => new Date().toISOString();
 const codexPermissionArgs = (profile: AgentPermissionProfile = "PROJECT"): string[] => {
   if (profile === "FULL") return ["--dangerously-bypass-approvals-and-sandbox", "--search"];
@@ -38,16 +38,18 @@ export class CodexCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     if (this.executions.has(request.taskId)) throw new Error("Task already executing");
     const startedAt = at(); const child = spawn("codex", ["exec", "--json", "--skip-git-repo-check", ...codexPermissionArgs(request.permissionProfile), "-C", request.workingDirectory, buildCodexPrompt(request)], { stdio: "pipe", windowsHide: true });
     const execution: Execution = { process: child, workingDirectory: request.workingDirectory, events: [{ type: "STARTED", message: "Codex iniciado", at: startedAt }] }; this.executions.set(request.taskId, execution);
+    execution.timeout = setTimeout(() => { execution.events.push({ type: "LOG", message: "Tempo limite de 15 minutos excedido.", at: at() }); child.kill(); void this.finish(request.taskId, startedAt, "Tempo limite de 15 minutos excedido.", "FAILED"); }, 15 * 60_000);
     let buffer = ""; child.stdout.on("data", (chunk: Buffer) => { buffer += chunk.toString(); let index; while ((index = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (!line) continue; try { const parsed = JSON.parse(line) as { type?: string; item?: { text?: string }; message?: string }; if (parsed.type !== "turn.completed") execution.events.push({ type: "LOG", message: parsed.item?.text ?? parsed.message ?? line, at: at() }); } catch { execution.events.push({ type: "LOG", message: line, at: at() }); } } });
     child.stderr.on("data", (chunk: Buffer) => execution.events.push({ type: "LOG", message: chunk.toString().trim(), at: at() }));
     child.on("error", (error) => void this.finish(request.taskId, startedAt, `Não foi possível iniciar o Codex: ${error.message}`, "FAILED"));
-    child.on("close", (code) => void this.finish(request.taskId, startedAt, code === 0 ? "Codex concluiu a tarefa" : `Codex saiu com código ${code}`, code === 0 ? "COMPLETED" : "FAILED"));
+    child.on("close", (code) => { const detail = execution.events.filter((event) => event.type === "LOG").slice(-6).map((event) => event.message).join("\n"); void this.finish(request.taskId, startedAt, code === 0 ? "Codex concluiu a tarefa" : detail || `Codex saiu com código ${code}`, code === 0 ? "COMPLETED" : "FAILED"); });
   }
   async *streamEvents(taskId: string): AsyncIterable<AgentExecutionEvent> { const execution = this.executions.get(taskId); if (!execution) return; let index = 0; while (!execution.result || index < execution.events.length) { while (index < execution.events.length) yield execution.events[index++]!; if (!execution.result) await new Promise((resolve) => setTimeout(resolve, 100)); } }
   async cancelTask(taskId: string): Promise<void> { const execution = this.executions.get(taskId); if (!execution || execution.result) return; execution.process.kill(); await this.finish(taskId, execution.events[0]!.at, "Cancelada pelo operador", "CANCELLED"); }
   async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { return this.executions.get(taskId)?.result; }
   private async finish(taskId: string, startedAt: string, summary: string, status: AgentExecutionResult["status"]): Promise<void> {
     const execution = this.executions.get(taskId); if (!execution || execution.result) return;
+    if (execution.timeout) clearTimeout(execution.timeout);
     const git = await this.gitState(execution.workingDirectory); const completedAt = at(); execution.result = { taskId, status, summary, files: git.files, branch: git.branch, startedAt, completedAt };
     execution.events.push({ type: status === "COMPLETED" ? "COMPLETED" : status === "CANCELLED" ? "CANCELLED" : "FAILED", message: summary, at: completedAt });
   }

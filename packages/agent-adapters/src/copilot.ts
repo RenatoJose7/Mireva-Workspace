@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AgentAdapter, AgentCapability, AgentConversationRequest, AgentPermissionProfile, AdapterAuthentication, AdapterDetection, AgentExecutionEvent, AgentExecutionRequest, AgentExecutionResult, AgentPlan, AgentPlanningRequest, ProjectPlanningAdapter } from "./index.js";
 
-interface Execution { process: ChildProcessWithoutNullStreams; events: AgentExecutionEvent[]; workingDirectory: string; result?: AgentExecutionResult }
+interface Execution { process: ChildProcessWithoutNullStreams; events: AgentExecutionEvent[]; workingDirectory: string; timeout?: NodeJS.Timeout; result?: AgentExecutionResult }
 const at = () => new Date().toISOString();
 export const copilotPermissionArgs = (profile: AgentPermissionProfile = "PROJECT"): string[] => {
   if (profile === "FULL") return ["--allow-all"];
@@ -78,10 +78,11 @@ export class CopilotCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     const child = spawn(this.command, ["-s", "-p", buildCopilotPrompt(request), ...copilotPermissionArgs(request.permissionProfile)], { cwd: request.workingDirectory, stdio: "pipe", windowsHide: true });
     const execution: Execution = { process: child, workingDirectory: request.workingDirectory, events: [{ type: "STARTED", message: "GitHub Copilot iniciado", at: startedAt }] };
     this.executions.set(request.taskId, execution);
+    execution.timeout = setTimeout(() => { this.log(execution, "Tempo limite de 15 minutos excedido."); child.kill(); void this.finish(request.taskId, startedAt, "Tempo limite de 15 minutos excedido.", "FAILED"); }, 15 * 60_000);
     child.stdout.on("data", (chunk: Buffer) => this.log(execution, chunk.toString()));
     child.stderr.on("data", (chunk: Buffer) => this.log(execution, chunk.toString()));
     child.on("error", (error) => void this.finish(request.taskId, startedAt, `Não foi possível iniciar o Copilot: ${error.message}`, "FAILED"));
-    child.on("close", (code) => void this.finish(request.taskId, startedAt, code === 0 ? "Copilot concluiu a tarefa" : `Copilot saiu com código ${code}`, code === 0 ? "COMPLETED" : "FAILED"));
+    child.on("close", (code) => { const detail = execution.events.filter((event) => event.type === "LOG").slice(-6).map((event) => event.message).join("\n"); void this.finish(request.taskId, startedAt, code === 0 ? "Copilot concluiu a tarefa" : detail || `Copilot saiu com código ${code}`, code === 0 ? "COMPLETED" : "FAILED"); });
   }
   async *streamEvents(taskId: string): AsyncIterable<AgentExecutionEvent> {
     const execution = this.executions.get(taskId); if (!execution) return; let index = 0;
@@ -92,6 +93,7 @@ export class CopilotCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
   private log(execution: Execution, output: string): void { for (const line of output.split("\n").map((item) => item.trim()).filter(Boolean)) execution.events.push({ type: "LOG", message: line, at: at() }); }
   private async finish(taskId: string, startedAt: string, summary: string, status: AgentExecutionResult["status"]): Promise<void> {
     const execution = this.executions.get(taskId); if (!execution || execution.result) return;
+    if (execution.timeout) clearTimeout(execution.timeout);
     const git = await this.gitState(execution.workingDirectory); const completedAt = at();
     execution.result = { taskId, status, summary, files: git.files, branch: git.branch, startedAt, completedAt };
     execution.events.push({ type: status === "COMPLETED" ? "COMPLETED" : status === "CANCELLED" ? "CANCELLED" : "FAILED", message: summary, at: completedAt });

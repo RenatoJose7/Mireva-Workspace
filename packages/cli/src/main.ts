@@ -40,6 +40,7 @@ async function run(): Promise<void> {
     const authentication = await adapter.checkAuthentication(); if (!authentication.authenticated) throw new Error(authentication.reason ?? `Adapter ${adapter.id} não autenticado`);
     const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) });
     await runner.setPresence("AVAILABLE");
+    const recovered = await runner.recover(); if (recovered.length) output({ recovered: recovered.map((task) => task.id), message: "Tarefas interrompidas foram recuperadas" });
     const worker = new RunnerTaskWorker(runner, adapter, projectDirectory());
     const messages = new DirectMessageWorker(runner, adapter, projectDirectory());
     let running = false;
@@ -53,6 +54,7 @@ async function run(): Promise<void> {
     if (!isProjectPlanningAdapter(adapter)) throw new Error(`O adapter ${adapter.id} ainda não cria planos. Use codex ou copilot.`);
     const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) });
     await runner.setPresence("AVAILABLE");
+    const recovered = await runner.recover(); if (recovered.length) output({ recovered: recovered.map((task) => task.id), message: "Execuções interrompidas foram recuperadas" });
     const worker = new OrchestratorWorker(runner, new MirevaOrchestrator(runner, new AdapterProjectPlanner(adapter, projectDirectory())));
     let running = false;
     const run = async () => { if (running) return; running = true; try { await runner.heartbeat(); const result = await worker.runOnce(); output({ ...result, message: result.planId ? "Plano enviado para aprovação" : result.error ? "Falha ao criar plano" : "Nenhum pedido pendente" }); await saveState(config); } finally { running = false; } };

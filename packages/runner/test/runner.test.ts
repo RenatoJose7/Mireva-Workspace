@@ -3,13 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLocalHub, type LocalHub } from "../../../apps/hub/src/server.js";
-import { DirectMessageWorker, joinRunner, MirevaOrchestrator, MirevaRunner, OrchestratorWorker } from "../src/index.js";
+import { classifyRunnerError, DirectMessageWorker, joinRunner, MirevaOrchestrator, MirevaRunner, OrchestratorWorker } from "../src/index.js";
 import { AgentTaskExecutor, RunnerTaskWorker } from "../src/index.js";
 import { MockAgentAdapter } from "@mireva/agent-adapters";
 
 let hub: LocalHub | undefined;
+class PermissionDeniedAdapter extends MockAgentAdapter { override async executeTask(): Promise<void> { throw new Error("permission denied by sandbox"); } }
 afterEach(async () => { await hub?.close(); });
 describe("MirevaRunner", () => {
+  it("turns provider output into an actionable error", () => {
+    expect(classifyRunnerError(new Error("permission denied by sandbox"), "EXECUTE_TASK")).toMatchObject({ code: "PERMISSION_REQUIRED", state: "WAITING_PERMISSION", requiredPermission: "FULL", retryable: true });
+    expect(classifyRunnerError(new Error("429 rate limit exceeded"), "ORCHESTRATE")).toMatchObject({ code: "RATE_LIMITED", state: "RATE_LIMITED" });
+  });
   it("syncs an event published by a separate runner", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-runner-")), "hub.json") });
     const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Sync", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
@@ -34,6 +39,14 @@ describe("MirevaRunner", () => {
     await new AgentTaskExecutor(runner, new MockAgentAdapter()).execute(claimed, ".");
     const snapshot = await fetch(`${hub.url}/rooms/${room.room.code}`).then((r) => r.json()) as { tasks: Array<{ id: string; status: string; result: string }> };
     expect(snapshot.tasks.find((entry) => entry.id === task.id)).toMatchObject({ status: "REVIEW", result: "Entrega simulada" });
+  });
+  it("turns a permission failure into a reviewable request", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-permission-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Permission", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
+    const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Runner", "mock")); const task = await runner.createTask({ title: "Protegida" }); const claimed = await runner.claimTask(task.id);
+    await expect(new AgentTaskExecutor(runner, new PermissionDeniedAdapter()).execute(claimed, ".")).rejects.toThrow("permission denied");
+    const snapshot = await runner.snapshot(); expect(snapshot.tasks.find((entry) => entry.id === task.id)?.status).toBe("WAITING_APPROVAL"); expect(snapshot.participants.find((entry) => entry.id === runner.config.participantId)?.state).toBe("WAITING_PERMISSION");
+    expect((await runner.events()).map((event) => event.kind)).toEqual(expect.arrayContaining(["RUNNER_ERROR", "PERMISSION_REQUESTED"]));
   });
   it("automatically claims and executes the next ready task", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-worker-")), "hub.json") });

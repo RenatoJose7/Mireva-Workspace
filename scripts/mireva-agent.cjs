@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const http = require("node:http");
-const { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } = require("node:fs");
+const { accessSync, appendFileSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } = require("node:fs");
 const { randomBytes, randomUUID } = require("node:crypto");
 const { homedir } = require("node:os");
 const { dirname, join, resolve } = require("node:path");
@@ -8,18 +8,19 @@ const { spawn, spawnSync } = require("node:child_process");
 
 const DEFAULT_HUB = "https://mireva-hub.renatojosesfc.workers.dev";
 const PNPM_VERSION = "11.25.0";
-const AGENT_CONFIG_VERSION = 4;
+const AGENT_CONFIG_VERSION = 5;
 const configFile = () => join(process.env.MIREVA_HOME || join(homedir(), ".mireva"), "agent.json");
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 function agentConfig() {
   const file = configFile();
-  try { const config = JSON.parse(readFileSync(file, "utf8")); if (config.version === AGENT_CONFIG_VERSION && config.token && config.port) return config; } catch {}
+  let previous;
+  try { const config = JSON.parse(readFileSync(file, "utf8")); if (config.version === AGENT_CONFIG_VERSION && config.token && config.port) return config; previous = config; } catch {}
   mkdirSync(dirname(file), { recursive: true });
   // A new bridge version deliberately moves to a fresh local port. Older
   // detached agents can survive a terminal/PC restart; rotating the endpoint
   // endpoint lets an updated launcher start cleanly instead of talking to a
   // stale process that still has the old bridge code in memory.
-  const config = { version: AGENT_CONFIG_VERSION, port: 49324, token: randomBytes(24).toString("hex") };
+  const config = { version: AGENT_CONFIG_VERSION, port: 49325, token: randomBytes(24).toString("hex"), legacy: previous?.token && previous?.port ? { port: previous.port, token: previous.token } : undefined };
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   return config;
 }
@@ -62,38 +63,65 @@ async function verifyStartup(child, log) {
   }
   if (child.exitCode !== null) throw new Error(logTail(log) || `A IA encerrou ao iniciar (código ${child.exitCode})`);
 }
+function programCheck(agent) {
+  if (agent === "mock") return { ok: true, detail: "Adapter de teste disponível" };
+  const result = spawnSync(executable(agent), ["--version"], { encoding: "utf8", windowsHide: true });
+  return result.status === 0 ? { ok: true, detail: (result.stdout || result.stderr || "Instalado").trim().split("\n")[0] } : { ok: false, detail: `${agent} não foi encontrado no PATH`, fix: agent === "codex" ? "Instale com npm install -g @openai/codex" : "Instale a GitHub Copilot CLI e abra copilot uma vez para autenticar" };
+}
+async function diagnostics(input) {
+  const projectDirectory = resolve(String(input.projectDirectory ?? process.cwd())); const checks = [];
+  try { accessSync(projectDirectory, constants.R_OK); checks.push({ key: "folder-read", status: "ok", title: "Pasta legível", detail: projectDirectory }); } catch { checks.push({ key: "folder-read", status: "error", title: "Pasta inacessível", detail: projectDirectory, fix: "Escolha uma pasta existente com permissão de leitura" }); }
+  try { accessSync(projectDirectory, constants.W_OK); checks.push({ key: "folder-write", status: "ok", title: "Pasta gravável", detail: "A IA pode alterar arquivos nesta pasta" }); } catch { checks.push({ key: "folder-write", status: "error", title: "Sem permissão de escrita", detail: projectDirectory, fix: "Ajuste as permissões da pasta ou use Somente leitura" }); }
+  const program = programCheck(input.agent); checks.push({ key: "provider", status: program.ok ? "ok" : "error", title: program.ok ? `${input.agent} instalado` : `${input.agent} indisponível`, detail: program.detail, fix: program.fix });
+  if (input.agent === "codex" && program.ok) { const auth = spawnSync(executable("codex"), ["login", "status"], { encoding: "utf8", windowsHide: true }); checks.push({ key: "auth", status: auth.status === 0 ? "ok" : "error", title: auth.status === 0 ? "Codex autenticado" : "Login do Codex necessário", detail: (auth.stdout || auth.stderr || "").trim(), fix: auth.status === 0 ? undefined : "Execute codex login no terminal" }); }
+  else checks.push({ key: "auth", status: program.ok ? "warning" : "error", title: input.agent === "copilot" ? "Login confirmado ao iniciar" : "Autenticação", detail: input.agent === "copilot" ? "A Copilot CLI valida a sessão na primeira execução" : "Não aplicável", fix: input.agent === "copilot" ? "Se falhar, abra copilot no terminal e conclua o login" : undefined });
+  try { const response = await fetch(`${String(input.hub || DEFAULT_HUB).replace(/\/$/, "")}/health`, { signal: AbortSignal.timeout(5_000) }); checks.push({ key: "hub", status: response.ok ? "ok" : "error", title: response.ok ? "Hub acessível" : "Hub respondeu com erro", detail: `HTTP ${response.status}`, fix: response.ok ? undefined : "Confira a internet ou o endereço do Hub" }); }
+  catch (error) { checks.push({ key: "hub", status: "error", title: "Hub inacessível", detail: error instanceof Error ? error.message : String(error), fix: "Confira a conexão com a internet e tente novamente" }); }
+  return { ok: !checks.some((check) => check.status === "error"), checkedAt: new Date().toISOString(), projectDirectory, checks };
+}
+async function reportStartupFailure(stateFile, cause) {
+  try { const state = JSON.parse(readFileSync(stateFile, "utf8")); const details = cause instanceof Error ? cause.stack || cause.message : String(cause); const text = details.toLowerCase(); const auth = /auth|login|não autentic|not authenticated/.test(text); const missing = /enoent|command not found|não encontrado|cannot find/.test(text); const payload = { code: auth ? "AUTH_REQUIRED" : missing ? "TOOL_MISSING" : "STARTUP_FAILED", title: auth ? "Login necessário" : missing ? "Ferramenta não encontrada" : "Runner não iniciou", message: auth ? "A IA precisa ser autenticada neste computador." : missing ? "A ferramenta da IA não foi encontrada no PATH." : "O processo do runner encerrou durante a inicialização.", operation: "START_RUNNER", retryable: true, suggestedAction: auth ? "Abra a IA no terminal, conclua o login e tente novamente." : missing ? "Execute o diagnóstico e instale a ferramenta indicada." : "Confira o log local e tente iniciar a estação novamente.", taskId: null, technicalDetails: details, occurredAt: new Date().toISOString(), state: auth ? "AUTH_REQUIRED" : "BLOCKED" }; const base = String(state.hubUrl).replace(/\/$/, ""); await fetch(`${base}/rooms/${state.roomCode}/events`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: state.participantId, kind: "RUNNER_ERROR", payload }) }); await fetch(`${base}/rooms/${state.roomCode}/presence`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: state.participantId, state: payload.state }) }); } catch {}
+}
+async function stopLegacyAgent(legacy) {
+  if (!legacy?.port || !legacy?.token) return;
+  try { const headers = { "x-mireva-token": legacy.token }; const health = await fetch(`http://127.0.0.1:${legacy.port}/health`, { headers, signal: AbortSignal.timeout(1_500) }); if (!health.ok) return; const result = await health.json(); for (const session of Array.isArray(result.sessions) ? result.sessions : []) if (session.id) await fetch(`http://127.0.0.1:${legacy.port}/sessions/${session.id}/stop`, { method: "POST", headers, signal: AbortSignal.timeout(1_500) }).catch(() => undefined); } catch {}
+}
 function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, port = agentConfig().port, token = agentConfig().token } = {}) {
   if (!runtimeDirectory) throw new Error("MIREVA_RUNTIME_DIR não informado");
   const sessions = new Map();
+  const sessionsFile = join(process.env.MIREVA_HOME || join(homedir(), ".mireva"), "sessions.json");
+  const persistSessions = () => { mkdirSync(dirname(sessionsFile), { recursive: true }); writeFileSync(sessionsFile, `${JSON.stringify([...sessions.values()].filter((session) => !session.stopped).map(({ child, timer, ...session }) => session), null, 2)}\n`); };
+  const launch = async (input, saved = {}) => {
+    const sessionId = saved.id || randomUUID(); const state = saved.state || join(input.projectDirectory, ".mireva", `runner-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "agent"}.json`); mkdirSync(dirname(state), { recursive: true });
+    if (!canReuseState(state, input)) await runJoin(runtimeDirectory, input, state);
+    const log = saved.log || join(input.projectDirectory, ".mireva", `agent-${sessionId}.log`); const workerCommand = input.role === "ORCHESTRATOR" ? "orchestrate" : "work"; const logFd = openSync(log, "a"); let child;
+    try { child = command(runtimeDirectory, [workerCommand, "--state", state, "--adapter", input.agent, "--project-dir", input.projectDirectory], { cwd: input.projectDirectory, detached: true, stdio: ["ignore", logFd, logFd] }); } finally { closeSync(logFd); }
+    child.unref(); const session = { ...saved, id: sessionId, ...input, state, log, startedAt: saved.startedAt || new Date().toISOString(), restartedAt: saved.startedAt ? new Date().toISOString() : undefined, restartCount: Number(saved.restartCount || 0), stopped: false, child }; sessions.set(sessionId, session); persistSessions();
+    child.on("exit", (code) => { const current = sessions.get(sessionId); if (!current || current.stopped || current.child !== child) return; current.restartCount += 1; appendFileSync(log, `\n[Mireva] Runner encerrou com código ${code}. Tentativa ${current.restartCount}/5.\n`); if (current.restartCount > 5) { current.stopped = true; persistSessions(); return; } const wait = Math.min(30_000, 1_000 * 2 ** (current.restartCount - 1)); current.timer = setTimeout(() => void launch(input, current).catch((error) => appendFileSync(log, `\n[Mireva] Falha ao reiniciar: ${error instanceof Error ? error.message : String(error)}\n`)), wait); });
+    return session;
+  };
   const server = http.createServer(async (request, response) => {
     if (request.method === "OPTIONS") return json(response, 204, {});
     if (request.headers["x-mireva-token"] !== token) return json(response, 401, { error: "Mireva Agent não autorizado" });
     try {
       const url = new URL(request.url, "http://127.0.0.1");
-      if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { ok: true, sessions: [...sessions.values()].map(({ child, ...session }) => ({ ...session, running: child.exitCode === null })) });
+      if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { ok: true, sessions: [...sessions.values()].map((session) => ({ id: session.id, name: session.name, agent: session.agent, role: session.role, projectDirectory: session.projectDirectory, log: session.log, startedAt: session.startedAt, restartedAt: session.restartedAt, restartCount: session.restartCount, running: session.child.exitCode === null && !session.stopped })) });
+      if (request.method === "POST" && url.pathname === "/diagnostics") return json(response, 200, await diagnostics(await body(request)));
+      const sessionLog = url.pathname.match(/^\/sessions\/([^/]+)\/log$/);
+      if (request.method === "GET" && sessionLog) { const session = sessions.get(sessionLog[1]); if (!session) return json(response, 404, { error: "Runner não encontrado" }); return json(response, 200, { id: session.id, log: logTail(session.log), filename: session.log }); }
       if (request.method === "POST" && url.pathname === "/connect") {
-        const input = valid(await body(request)); const sessionId = randomUUID(); const state = join(input.projectDirectory, ".mireva", `runner-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "agent"}.json`); mkdirSync(dirname(state), { recursive: true });
+        const input = valid(await body(request));
         const activeSession = [...sessions.values()].find((session) => session.name === input.name && session.agent === input.agent && session.projectDirectory === input.projectDirectory && session.child.exitCode === null);
         if (activeSession) return json(response, 200, { id: activeSession.id, log: activeSession.log, reused: true });
-        if (!canReuseState(state, input)) await runJoin(runtimeDirectory, input, state);
-        const log = join(input.projectDirectory, ".mireva", `agent-${sessionId}.log`); const workerCommand = input.role === "ORCHESTRATOR" ? "orchestrate" : "work";
-        // spawn() requires a stream to have an open file descriptor. A newly
-        // created WriteStream may still have fd=null, so open the log
-        // synchronously and pass the descriptor directly to the child.
-        const logFd = openSync(log, "a");
-        let child;
-        try { child = command(runtimeDirectory, [workerCommand, "--state", state, "--adapter", input.agent, "--project-dir", input.projectDirectory], { cwd: input.projectDirectory, detached: true, stdio: ["ignore", logFd, logFd] }); }
-        finally { closeSync(logFd); }
-        child.unref(); sessions.set(sessionId, { id: sessionId, name: input.name, agent: input.agent, role: input.role, projectDirectory: input.projectDirectory, log, startedAt: new Date().toISOString(), child });
-        await verifyStartup(child, log);
-        return json(response, 201, { id: sessionId, log });
+        const session = await launch(input); try { await verifyStartup(session.child, session.log); } catch (error) { await reportStartupFailure(session.state, error); throw error; }
+        return json(response, 201, { id: session.id, log: session.log });
       }
       const stop = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/);
-      if (request.method === "POST" && stop) { const session = sessions.get(stop[1]); if (!session) return json(response, 404, { error: "Runner não encontrado nesta sessão" }); session.child.kill(); return json(response, 200, { stopped: true }); }
+      if (request.method === "POST" && stop) { const session = sessions.get(stop[1]); if (!session) return json(response, 404, { error: "Runner não encontrado nesta sessão" }); session.stopped = true; if (session.timer) clearTimeout(session.timer); session.child.kill(); persistSessions(); return json(response, 200, { stopped: true }); }
       return json(response, 404, { error: "Rota não encontrada" });
     } catch (error) { return json(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
   });
-  server.listen(port, "127.0.0.1", () => console.log(`Mireva Agent ativo em http://127.0.0.1:${port}`));
+  server.listen(port, "127.0.0.1", () => { const address = server.address(); const restoreProject = process.env.MIREVA_PROJECT_DIR ? resolve(process.env.MIREVA_PROJECT_DIR) : null; console.log(`Mireva Agent ativo em http://127.0.0.1:${typeof address === "object" && address ? address.port : port}`); void stopLegacyAgent(agentConfig().legacy); try { const saved = JSON.parse(readFileSync(sessionsFile, "utf8")); for (const session of Array.isArray(saved) ? saved : []) if (!session.stopped && existsSync(session.projectDirectory) && (!restoreProject || resolve(session.projectDirectory) === restoreProject)) void launch(session, session).catch((error) => console.error(`Não foi possível restaurar ${session.name}:`, error)); } catch {} });
   return server;
 }
 if (require.main === module) startAgentServer();

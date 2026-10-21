@@ -1,8 +1,19 @@
 import type { AgentAdapter, AgentExecutionRequest, AgentPlan, ProjectPlanningAdapter } from "@mireva/agent-adapters";
-import type { AgentRole, AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, PermissionProfile, RoomEvent, Task } from "@mireva/protocol";
+import type { AgentRole, AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, PermissionProfile, RoomEvent, RunnerError, Task } from "@mireva/protocol";
 
 export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; role?: AgentRole; capabilities: string[]; lastSequence: number }
 export interface RunnerCallbacks { onEvent?(event: RoomEvent): void; onError?(error: Error): void }
+export type ClassifiedRunnerError = RunnerError & { state: AgentState; requiredPermission?: PermissionProfile };
+export function classifyRunnerError(cause: unknown, operation: string, taskId: string | null = null): ClassifiedRunnerError {
+  const technicalDetails = cause instanceof Error ? cause.stack ?? cause.message : String(cause); const text = technicalDetails.toLowerCase(); const occurredAt = new Date().toISOString();
+  if (/auth|login|not authenticated|não autentic/.test(text)) return { code: "AUTH_REQUIRED", title: "Login necessário", message: "A IA precisa ser autenticada neste computador.", operation, retryable: true, suggestedAction: "Abra a IA no terminal, conclua o login e tente novamente.", taskId, technicalDetails, occurredAt, state: "AUTH_REQUIRED" };
+  if (/429|rate.?limit|quota|credit|crédito|usage limit/.test(text)) return { code: "RATE_LIMITED", title: "Limite do provedor atingido", message: "O provedor interrompeu a execução por limite de uso.", operation, retryable: true, suggestedAction: "Aguarde a renovação do limite ou troque a IA responsável.", taskId, technicalDetails, occurredAt, state: "RATE_LIMITED" };
+  if (/enotfound|econnrefused|network|internet|fetch failed|socket|dns/.test(text)) return { code: "NO_NETWORK", title: "Sem conexão", message: "A IA não conseguiu acessar a rede necessária para continuar.", operation, retryable: true, suggestedAction: "Verifique a internet e use o perfil Projeto + internet quando a tarefa precisar acessar URLs.", taskId, technicalDetails, occurredAt, state: "NO_NETWORK", requiredPermission: "PROJECT_NETWORK" };
+  if (/permission|denied|approval|not allowed|blocked|sandbox|read.?only/.test(text)) return { code: "PERMISSION_REQUIRED", title: "Permissão necessária", message: "A política atual bloqueou uma ação solicitada pela tarefa.", operation, retryable: true, suggestedAction: "Libere acesso somente para esta tarefa ou altere o perfil da estação.", taskId, technicalDetails, occurredAt, state: "WAITING_PERMISSION", requiredPermission: "FULL" };
+  if (/enoent|command not found|não encontrado|cannot find/.test(text)) return { code: "TOOL_MISSING", title: "Ferramenta não encontrada", message: "Um programa necessário não está instalado ou não está no PATH.", operation, retryable: true, suggestedAction: "Execute o diagnóstico da estação, instale a ferramenta indicada e tente novamente.", taskId, technicalDetails, occurredAt, state: "BLOCKED" };
+  if (/timeout|tempo limite|timed out/.test(text)) return { code: "TIMEOUT", title: "Execução travada", message: "A execução ultrapassou o tempo máximo sem terminar.", operation, retryable: true, suggestedAction: "Confira o log e tente novamente. Se persistir, divida a tarefa em partes menores.", taskId, technicalDetails, occurredAt, state: "BLOCKED" };
+  return { code: "EXECUTION_FAILED", title: "Execução interrompida", message: cause instanceof Error ? cause.message : String(cause), operation, retryable: true, suggestedAction: "Abra os detalhes técnicos, corrija a causa indicada e tente novamente.", taskId, technicalDetails, occurredAt, state: "BLOCKED" };
+}
 
 export class MirevaRunner {
   private timer: NodeJS.Timeout | undefined;
@@ -30,7 +41,8 @@ export class MirevaRunner {
   async createPlan(input: { request: string; summary: string; tasks: OrchestrationPlanRecord["tasks"] }): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans`, { method: "POST", body: { participantId: this.config.participantId, ...input } }) as Promise<OrchestrationPlanRecord>; }
   async decidePlan(planId: string, status: "APPROVED" | "REJECTED"): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans/${planId}/decision`, { method: "POST", body: { ownerId: this.config.participantId, status } }) as Promise<OrchestrationPlanRecord>; }
   async claimTask(taskId: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/claim`, { method: "POST", body: { participantId: this.config.participantId } }) as Promise<Task>; }
-  async updateTask(taskId: string, status: Task["status"], result?: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/status`, { method: "POST", body: { participantId: this.config.participantId, status, result } }) as Promise<Task>; }
+  async updateTask(taskId: string, status: Task["status"], result?: string, executionId?: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/status`, { method: "POST", body: { participantId: this.config.participantId, status, result, executionId } }) as Promise<Task>; }
+  async recover(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/participants/${this.config.participantId}/recover`, { method: "POST" }) as Promise<Task[]>; }
   async events(after = 0): Promise<RoomEvent[]> { return this.request(`/rooms/${this.config.roomCode}/events?after=${after}&participantId=${this.config.participantId}`) as Promise<RoomEvent[]>; }
   async poll(): Promise<RoomEvent[]> {
     const events = await this.events(this.config.lastSequence);
@@ -61,18 +73,24 @@ export class AgentTaskExecutor {
   constructor(private readonly runner: MirevaRunner, private readonly adapter: AgentAdapter) {}
   async execute(task: Task, workingDirectory: string, context: string[] = [], permissionProfile: PermissionProfile = "PROJECT"): Promise<void> {
     const request: AgentExecutionRequest = { taskId: task.id, title: task.title, instructions: task.description, workingDirectory, context, permissionProfile };
-    await this.runner.setPresence("WORKING");
-    await this.runner.updateTask(task.id, "RUNNING");
+    await this.runner.setPresence("EXECUTING");
+    await this.runner.updateTask(task.id, "RUNNING", undefined, task.executionId ?? undefined);
     const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
+    let finalState: AgentState = "AVAILABLE";
     try {
       await this.adapter.executeTask(request);
       for await (const event of this.adapter.streamEvents(task.id)) await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, event });
       const result = await this.adapter.getResult(task.id);
       if (result) await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, delivery: { status: result.status, summary: result.summary, files: result.files, branch: result.branch } });
-      if (result?.status === "COMPLETED") await this.runner.updateTask(task.id, "REVIEW", result.summary);
-      else await this.runner.updateTask(task.id, "FAILED", result?.summary ?? "O agente não retornou uma entrega");
-    } catch (error: unknown) { await this.runner.updateTask(task.id, "FAILED", error instanceof Error ? error.message : String(error)); throw error; }
-    finally { clearInterval(heartbeat); await this.runner.setPresence("AVAILABLE"); }
+      if (result?.status === "COMPLETED") await this.runner.updateTask(task.id, "REVIEW", result.summary, task.executionId ?? undefined);
+      else throw new Error(result?.summary ?? "O agente não retornou uma entrega");
+    } catch (error: unknown) {
+      const failure = classifyRunnerError(error, "EXECUTE_TASK", task.id); finalState = failure.state;
+      await this.runner.publish("RUNNER_ERROR", { ...failure });
+      if (failure.requiredPermission) { await this.runner.publish("PERMISSION_REQUESTED", { taskId: task.id, errorCode: failure.code, requiredPermission: failure.requiredPermission, reason: failure.message }); await this.runner.updateTask(task.id, "WAITING_APPROVAL", failure.message, task.executionId ?? undefined); }
+      else await this.runner.updateTask(task.id, "FAILED", failure.message, task.executionId ?? undefined);
+      throw error;
+    } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState); }
   }
 }
 
@@ -84,12 +102,12 @@ export class RunnerTaskWorker {
     const sharedContext = memory ? [...context, `Memória do projeto (siga estas decisões):\n${memory}`] : context;
     const assigned = await this.runner.assignedTasks();
     const participant = snapshot.participants.find((entry) => entry.id === this.runner.config.participantId);
-    const permissionProfile = participant?.permissionProfile ?? "PROJECT";
-    for (const task of assigned) { await new AgentTaskExecutor(this.runner, this.adapter).execute(task, this.workingDirectory, sharedContext, permissionProfile); return task.id; }
+    const basePermissionProfile = participant?.permissionProfile ?? "PROJECT";
+    for (const task of assigned) { const permissionProfile = task.permissionProfileOverride ?? basePermissionProfile; await new AgentTaskExecutor(this.runner, this.adapter).execute(task, this.workingDirectory, sharedContext, permissionProfile); return task.id; }
     const capabilities = participant?.capabilities ?? this.runner.config.capabilities ?? [];
     const tasks = (await this.runner.availableTasks()).filter((task) => task.requiredCapabilities.every((capability) => capabilities.includes(capability)));
     for (const task of tasks) {
-      try { const claimed = await this.runner.claimTask(task.id); await new AgentTaskExecutor(this.runner, this.adapter).execute(claimed, this.workingDirectory, sharedContext, permissionProfile); return task.id; }
+      try { const claimed = await this.runner.claimTask(task.id); const permissionProfile = claimed.permissionProfileOverride ?? basePermissionProfile; await new AgentTaskExecutor(this.runner, this.adapter).execute(claimed, this.workingDirectory, sharedContext, permissionProfile); return task.id; }
       catch (error: unknown) { if (!(error instanceof Error) || !error.message.includes("409")) throw error; }
     }
     return undefined;
@@ -119,16 +137,18 @@ export class DirectMessageWorker {
     const snapshot = await this.runner.snapshot();
     const participant = snapshot.participants.find((entry) => entry.id === this.runner.config.participantId);
     const context = events.filter((event) => ["AGENT_MESSAGE", "AGENT_RESPONSE"].includes(event.kind) && event.payload.targetParticipantId === this.runner.config.participantId).slice(-12).map((event) => `${event.kind === "AGENT_MESSAGE" ? "Responsável" : participant?.name ?? "Agente"}: ${String(event.payload.message ?? "")}`);
-    await this.runner.setPresence("WORKING");
+    await this.runner.setPresence("THINKING");
     const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
+    let finalState: AgentState = "AVAILABLE";
     try {
       const response = await this.adapter.respondToMessage({ message: String(message.payload.message), workingDirectory: this.workingDirectory, context, permissionProfile: participant?.permissionProfile ?? "PROJECT" });
       await this.runner.publish("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: response });
       return message.id;
     } catch (error: unknown) {
-      await this.runner.publish("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: `Não consegui responder: ${error instanceof Error ? error.message : String(error)}`, error: true });
+      const failure = classifyRunnerError(error, "DIRECT_MESSAGE"); finalState = failure.state; await this.runner.publish("RUNNER_ERROR", { ...failure });
+      await this.runner.publish("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: `${failure.title}: ${failure.message}`, error: true });
       return message.id;
-    } finally { clearInterval(heartbeat); await this.runner.setPresence("AVAILABLE"); }
+    } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState); }
   }
 }
 
@@ -164,18 +184,19 @@ export class OrchestratorWorker {
     const conversation = events.filter((event) => ["ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE"].includes(event.kind)).slice(-12).map((event) => event.kind === "ORCHESTRATOR_REQUEST" ? `Responsável: ${String(event.payload.message ?? "")}` : `Orquestrador: ${String((event.payload.orchestrator as { summary?: string } | undefined)?.summary ?? "")}`).join("\n");
     const teamConversation = events.filter((event) => ["AGENT_MESSAGE", "AGENT_RESPONSE"].includes(event.kind)).slice(-10).map((event) => `${event.kind === "AGENT_MESSAGE" ? "Responsável" : "Estação"}: ${String(event.payload.message ?? "")}`).join("\n");
     const contextualRequest = conversation ? `Conversa recente:\n${conversation}${teamConversation ? `\n\nConversas recentes com as estações:\n${teamConversation}` : ""}\n\nResponda à última mensagem do responsável.` : request;
-    await this.runner.setPresence("RESEARCHING");
+    await this.runner.setPresence("THINKING");
     // Planning may outlive the Hub's presence timeout while the provider
     // inspects the project. Keep the orchestrator visibly connected.
     const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
+    let finalState: AgentState = "AVAILABLE";
     try {
       const response = await this.orchestrator.respond(contextualRequest, request);
       await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: response.summary, planId: response.plan?.id, taskCount: response.plan?.tasks.length ?? 0 } });
       return { requestId: requestEvent.id, planId: response.plan?.id };
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: `Não foi possível responder: ${message}`, error: true } });
-      return { requestId: requestEvent.id, error: message };
-    } finally { clearInterval(heartbeat); await this.runner.setPresence("AVAILABLE"); }
+      const failure = classifyRunnerError(error, "ORCHESTRATE"); finalState = failure.state; await this.runner.publish("RUNNER_ERROR", { ...failure });
+      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: `${failure.title}: ${failure.message}`, error: true } });
+      return { requestId: requestEvent.id, error: failure.message };
+    } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState); }
   }
 }

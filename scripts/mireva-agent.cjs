@@ -41,6 +41,21 @@ function canReuseState(state, input) {
   try { const saved = JSON.parse(readFileSync(state, "utf8")); return saved.roomCode === input.roomCode && String(saved.hubUrl ?? "").replace(/\/$/, "") === input.hub && Boolean(saved.participantId); }
   catch { return false; }
 }
+const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+function logTail(filename) {
+  try { return readFileSync(filename, "utf8").trim().split("\n").slice(-8).join("\n"); }
+  catch { return ""; }
+}
+async function verifyStartup(child, log) {
+  const deadline = Date.now() + 6_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(logTail(log) || `A IA encerrou ao iniciar (código ${child.exitCode})`);
+    const output = logTail(log);
+    if (output.includes('"message"') || output.includes('"event"')) return;
+    await delay(200);
+  }
+  if (child.exitCode !== null) throw new Error(logTail(log) || `A IA encerrou ao iniciar (código ${child.exitCode})`);
+}
 function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, port = agentConfig().port, token = agentConfig().token } = {}) {
   if (!runtimeDirectory) throw new Error("MIREVA_RUNTIME_DIR não informado");
   const sessions = new Map();
@@ -64,6 +79,7 @@ function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, p
         try { child = command(runtimeDirectory, [workerCommand, "--state", state, "--adapter", input.agent, "--project-dir", input.projectDirectory], { cwd: input.projectDirectory, detached: true, stdio: ["ignore", logFd, logFd] }); }
         finally { closeSync(logFd); }
         child.unref(); sessions.set(sessionId, { id: sessionId, name: input.name, agent: input.agent, role: input.role, projectDirectory: input.projectDirectory, log, startedAt: new Date().toISOString(), child });
+        await verifyStartup(child, log);
         return json(response, 201, { id: sessionId, log });
       }
       const stop = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/);

@@ -126,6 +126,9 @@ export class OrchestratorWorker {
     if (!requestEvent) return {};
     const request = String(requestEvent.payload.message).trim();
     await this.runner.setPresence("RESEARCHING");
+    // Planning may outlive the Hub's presence timeout while the provider
+    // inspects the project. Keep the orchestrator visibly connected.
+    const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
     try {
       const plan = await this.orchestrator.planAndPropose(request);
       await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: plan.summary, planId: plan.id, taskCount: plan.tasks.length } });
@@ -134,6 +137,6 @@ export class OrchestratorWorker {
       const message = error instanceof Error ? error.message : String(error);
       await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: `Não foi possível criar o plano: ${message}`, error: true } });
       return { requestId: requestEvent.id, error: message };
-    } finally { await this.runner.setPresence("AVAILABLE"); }
+    } finally { clearInterval(heartbeat); await this.runner.setPresence("AVAILABLE"); }
   }
 }

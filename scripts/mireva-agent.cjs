@@ -8,13 +8,18 @@ const { spawn, spawnSync } = require("node:child_process");
 
 const DEFAULT_HUB = "https://mireva-hub.renatojosesfc.workers.dev";
 const PNPM_VERSION = "11.25.0";
+const AGENT_CONFIG_VERSION = 2;
 const configFile = () => join(process.env.MIREVA_HOME || join(homedir(), ".mireva"), "agent.json");
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 function agentConfig() {
   const file = configFile();
-  try { const config = JSON.parse(readFileSync(file, "utf8")); if (config.token && config.port) return config; } catch {}
+  try { const config = JSON.parse(readFileSync(file, "utf8")); if (config.version === AGENT_CONFIG_VERSION && config.token && config.port) return config; } catch {}
   mkdirSync(dirname(file), { recursive: true });
-  const config = { port: 49321, token: randomBytes(24).toString("hex") };
+  // Version 2 deliberately moves away from the original fixed port. Older
+  // detached agents can survive a terminal/PC restart; rotating the local
+  // endpoint lets an updated launcher start cleanly instead of talking to a
+  // stale process that still has the old bridge code in memory.
+  const config = { version: AGENT_CONFIG_VERSION, port: 49322, token: randomBytes(24).toString("hex") };
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   return config;
 }

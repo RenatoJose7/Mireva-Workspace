@@ -30,13 +30,16 @@ export class CodexCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     return this.agentMessages(outcome.output) || "Concluído.";
   }
   async planProject(request: AgentPlanningRequest): Promise<AgentPlan> {
-    const outcome = await this.run("codex", ["exec", "--json", "--skip-git-repo-check", ...codexPermissionArgs(request.permissionProfile ?? "READ_ONLY"), "-C", request.workingDirectory, buildCodexPlanningPrompt(request)], 90_000);
+    const outcome = await this.run("codex", ["exec", "--json", "--skip-git-repo-check", ...codexPermissionArgs(request.permissionProfile ?? "READ_ONLY"), "-C", request.workingDirectory, buildCodexPlanningPrompt(request)], 180_000);
     if (outcome.code !== 0) throw new Error(outcome.output.trim() || `Codex saiu com código ${outcome.code} ao criar o plano`);
     return parseCodexPlanOutput(outcome.output);
   }
   async executeTask(request: AgentExecutionRequest): Promise<void> {
     if (this.executions.has(request.taskId)) throw new Error("Task already executing");
     const startedAt = at(); const child = spawn("codex", ["exec", "--json", "--skip-git-repo-check", ...codexPermissionArgs(request.permissionProfile), "-C", request.workingDirectory, buildCodexPrompt(request)], { stdio: "pipe", windowsHide: true });
+    // `codex exec` reads any open stdin after the positional prompt. Closing
+    // the pipe is essential; otherwise it waits forever for another message.
+    child.stdin.end();
     const execution: Execution = { process: child, workingDirectory: request.workingDirectory, events: [{ type: "STARTED", message: "Codex iniciado", at: startedAt }] }; this.executions.set(request.taskId, execution);
     execution.timeout = setTimeout(() => { execution.events.push({ type: "LOG", message: "Tempo limite de 15 minutos excedido.", at: at() }); child.kill(); void this.finish(request.taskId, startedAt, "Tempo limite de 15 minutos excedido.", "FAILED"); }, 15 * 60_000);
     let buffer = ""; child.stdout.on("data", (chunk: Buffer) => { buffer += chunk.toString(); let index; while ((index = buffer.indexOf("\n")) >= 0) { const line = buffer.slice(0, index); buffer = buffer.slice(index + 1); if (!line) continue; try { const parsed = JSON.parse(line) as { type?: string; item?: { text?: string }; message?: string }; if (parsed.type !== "turn.completed") execution.events.push({ type: "LOG", message: parsed.item?.text ?? parsed.message ?? line, at: at() }); } catch { execution.events.push({ type: "LOG", message: line, at: at() }); } } });
@@ -58,5 +61,5 @@ export class CodexCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     return { branch: branch.code === 0 ? branch.output.trim() || undefined : undefined, files: status.code === 0 ? status.output.split("\n").filter(Boolean).map((line) => line.slice(3).trim()).filter(Boolean) : [] };
   }
   private agentMessages(output: string): string { return output.split("\n").flatMap((line) => { try { const event = JSON.parse(line) as { item?: { type?: string; text?: string } }; return event.item?.type === "agent_message" && typeof event.item.text === "string" ? [event.item.text] : []; } catch { return []; } }).join("\n").trim(); }
-  private run(command: string, args: string[], timeoutMs?: number): Promise<{ code: number | null; output: string }> { return new Promise((resolve) => { const child = spawn(command, args, { stdio: "pipe", windowsHide: true }); let output = ""; let settled = false; const finish = (code: number | null) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); resolve({ code, output }); }; const timer = timeoutMs ? setTimeout(() => { output += `\nTempo limite de ${Math.round(timeoutMs / 1_000)} segundos excedido.`; child.kill(); finish(124); }, timeoutMs) : undefined; child.stdout.on("data", (chunk: Buffer) => output += chunk); child.stderr.on("data", (chunk: Buffer) => output += chunk); child.on("error", () => finish(1)); child.on("close", finish); }); }
+  private run(command: string, args: string[], timeoutMs?: number): Promise<{ code: number | null; output: string }> { return new Promise((resolve) => { const child = spawn(command, args, { stdio: "pipe", windowsHide: true }); child.stdin.end(); let output = ""; let settled = false; const finish = (code: number | null) => { if (settled) return; settled = true; if (timer) clearTimeout(timer); resolve({ code, output }); }; const timer = timeoutMs ? setTimeout(() => { output += `\nTempo limite de ${Math.round(timeoutMs / 1_000)} segundos excedido.`; child.kill(); finish(124); }, timeoutMs) : undefined; child.stdout.on("data", (chunk: Buffer) => output += chunk); child.stderr.on("data", (chunk: Buffer) => output += chunk); child.on("error", () => finish(1)); child.on("close", finish); }); }
 }

@@ -4,12 +4,20 @@ import { parseAgentPlan } from "./copilot.js";
 
 interface Execution { process: ChildProcessWithoutNullStreams; events: AgentExecutionEvent[]; workingDirectory: string; timeout?: NodeJS.Timeout; result?: AgentExecutionResult }
 const at = () => new Date().toISOString();
-const codexPermissionArgs = (profile: AgentPermissionProfile = "PROJECT"): string[] => {
-  if (profile === "FULL") return ["--dangerously-bypass-approvals-and-sandbox", "--search"];
+export const codexGlobalArgs = (profile: AgentPermissionProfile = "PROJECT"): string[] =>
+  profile === "PROJECT_NETWORK" || profile === "FULL" ? ["--search"] : [];
+export const codexPermissionArgs = (profile: AgentPermissionProfile = "PROJECT"): string[] => {
+  if (profile === "FULL") return ["--dangerously-bypass-approvals-and-sandbox"];
   const args = ["--sandbox", profile === "READ_ONLY" ? "read-only" : "workspace-write"];
-  if (profile === "PROJECT_NETWORK") args.push("--search", "-c", "sandbox_workspace_write.network_access=true");
+  if (profile === "PROJECT_NETWORK") args.push("-c", "sandbox_workspace_write.network_access=true");
   return args;
 };
+export const buildCodexExecArgs = (profile: AgentPermissionProfile | undefined, args: string[]): string[] => [
+  ...codexGlobalArgs(profile),
+  "exec",
+  ...args,
+  ...codexPermissionArgs(profile),
+];
 export const buildCodexPrompt = (request: AgentExecutionRequest): string => [`Você está executando uma tarefa do Mireva Workspace.`, `Título: ${request.title}`, `Instruções: ${request.instructions}`, request.context.length ? `Contexto relevante:\n${request.context.join("\n")}` : "", "Trabalhe somente no diretório autorizado. Não faça operações destrutivas, force push, merge ou publicação. Ao terminar, explique resumidamente a entrega."].filter(Boolean).join("\n\n");
 export const buildCodexPlanningPrompt = (request: AgentPlanningRequest): string => ["Você é o orquestrador de tarefas do Mireva Workspace e está conversando com o responsável pelo projeto. Não altere arquivos, não instale dependências e não execute comandos que modifiquem o projeto. Só inspecione arquivos quando isso realmente ajudar a responder ou planejar.", `Pedido do responsável:\n${request.request}`, `Estado atual do projeto e dos agentes:\n${request.projectContext}`, "Responda SOMENTE com JSON válido, sem Markdown, usando exatamente este formato:", '{"summary":"resposta para o responsável","tasks":[{"title":"título","description":"instruções objetivas","dependencies":[0],"priority":50,"requiredCapabilities":["CODE"],"acceptanceCriteria":["critério verificável"]}]}', "Se a mensagem for uma saudação, pergunta, ideia incompleta ou ainda exigir decisões do responsável, responda naturalmente em summary, faça no máximo 3 perguntas objetivas e retorne tasks: []. Só crie tarefas quando houver informação suficiente ou quando o responsável pedir para montar o plano. Nesse caso, crie entre 1 e 30 tarefas pequenas e executáveis. dependencies usa índices de tarefas anteriores; use [] quando não houver dependência. requiredCapabilities deve usar apenas capacidades que existam entre os agentes conectados quando possível."].join("\n\n");
 export const parseCodexPlanOutput = (output: string): AgentPlan => {
@@ -25,18 +33,18 @@ export class CodexCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
   async getCapabilities(): Promise<AgentCapability[]> { return ["CODE", "RESEARCH", "TEST", "GIT", "STRUCTURED_OUTPUT", "CANCEL"]; }
   async respondToMessage(request: AgentConversationRequest): Promise<string> {
     const prompt = ["Você está conversando diretamente com o responsável por esta estação no Mireva Workspace.", `Mensagem: ${request.message}`, request.context.length ? `Contexto recente:\n${request.context.join("\n")}` : "", "Responda de forma objetiva. Só altere arquivos quando a mensagem pedir isso explicitamente."].filter(Boolean).join("\n\n");
-    const outcome = await this.run("codex", ["exec", "--json", "--skip-git-repo-check", ...codexPermissionArgs(request.permissionProfile), "-C", request.workingDirectory, prompt], 90_000);
+    const outcome = await this.run("codex", buildCodexExecArgs(request.permissionProfile, ["--json", "--skip-git-repo-check", "-C", request.workingDirectory, prompt]), 90_000);
     if (outcome.code !== 0) throw new Error(outcome.output.trim() || `Codex saiu com código ${outcome.code}`);
     return this.agentMessages(outcome.output) || "Concluído.";
   }
   async planProject(request: AgentPlanningRequest): Promise<AgentPlan> {
-    const outcome = await this.run("codex", ["exec", "--json", "--skip-git-repo-check", ...codexPermissionArgs(request.permissionProfile ?? "READ_ONLY"), "-C", request.workingDirectory, buildCodexPlanningPrompt(request)], 180_000);
+    const outcome = await this.run("codex", buildCodexExecArgs(request.permissionProfile ?? "READ_ONLY", ["--json", "--skip-git-repo-check", "-C", request.workingDirectory, buildCodexPlanningPrompt(request)]), 180_000);
     if (outcome.code !== 0) throw new Error(outcome.output.trim() || `Codex saiu com código ${outcome.code} ao criar o plano`);
     return parseCodexPlanOutput(outcome.output);
   }
   async executeTask(request: AgentExecutionRequest): Promise<void> {
     if (this.executions.has(request.taskId)) throw new Error("Task already executing");
-    const startedAt = at(); const child = spawn("codex", ["exec", "--json", "--skip-git-repo-check", ...codexPermissionArgs(request.permissionProfile), "-C", request.workingDirectory, buildCodexPrompt(request)], { stdio: "pipe", windowsHide: true });
+    const startedAt = at(); const child = spawn("codex", buildCodexExecArgs(request.permissionProfile, ["--json", "--skip-git-repo-check", "-C", request.workingDirectory, buildCodexPrompt(request)]), { stdio: "pipe", windowsHide: true });
     // `codex exec` reads any open stdin after the positional prompt. Closing
     // the pipe is essential; otherwise it waits forever for another message.
     child.stdin.end();

@@ -43,6 +43,16 @@ function valid(input) {
 function command(runtime, args, options = {}) {
   return spawn(executable("npx"), ["--yes", `pnpm@${PNPM_VERSION}`, "--dir", runtime, "--filter", "@mireva/cli", "mireva", ...args], options);
 }
+function terminateProcessTree(child) {
+  if (!child?.pid) return;
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
+    killer.unref();
+    return;
+  }
+  try { process.kill(-child.pid, "SIGTERM"); }
+  catch { try { child.kill(); } catch {} }
+}
 function runJoin(runtime, input, state) { return new Promise((resolve, reject) => { const child = command(runtime, ["join", input.roomCode, "--hub", input.hub, "--name", input.name, "--agent", input.agent, "--role", input.role, "--capabilities", input.capabilities.join(","), "--permissions", input.permissionProfile, "--state", state], { cwd: input.projectDirectory, stdio: "pipe" }); let error = ""; child.stderr.on("data", (chunk) => { error += chunk; }); child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(error.trim() || "Não foi possível entrar na sala"))); }); }
 function canReuseState(state, input) {
   try { const saved = JSON.parse(readFileSync(state, "utf8")); return saved.roomCode === input.roomCode && String(saved.hubUrl ?? "").replace(/\/$/, "") === input.hub && Boolean(saved.participantId); }
@@ -111,13 +121,13 @@ function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, p
       if (request.method === "GET" && sessionLog) { const session = sessions.get(sessionLog[1]); if (!session) return json(response, 404, { error: "Runner não encontrado" }); return json(response, 200, { id: session.id, log: logTail(session.log), filename: session.log }); }
       if (request.method === "POST" && url.pathname === "/connect") {
         const input = valid(await body(request));
-        const activeSession = [...sessions.values()].find((session) => session.name === input.name && session.agent === input.agent && session.projectDirectory === input.projectDirectory && session.child.exitCode === null);
+        const activeSession = [...sessions.values()].find((session) => !session.stopped && session.name === input.name && session.agent === input.agent && session.projectDirectory === input.projectDirectory && session.child.exitCode === null);
         if (activeSession) return json(response, 200, { id: activeSession.id, log: activeSession.log, reused: true });
         const session = await launch(input); try { await verifyStartup(session.child, session.log); } catch (error) { await reportStartupFailure(session.state, error); throw error; }
         return json(response, 201, { id: session.id, log: session.log });
       }
       const stop = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/);
-      if (request.method === "POST" && stop) { const session = sessions.get(stop[1]); if (!session) return json(response, 404, { error: "Runner não encontrado nesta sessão" }); session.stopped = true; if (session.timer) clearTimeout(session.timer); session.child.kill(); persistSessions(); return json(response, 200, { stopped: true }); }
+      if (request.method === "POST" && stop) { const session = sessions.get(stop[1]); if (!session) return json(response, 404, { error: "Runner não encontrado nesta sessão" }); session.stopped = true; if (session.timer) clearTimeout(session.timer); terminateProcessTree(session.child); persistSessions(); return json(response, 200, { stopped: true }); }
       return json(response, 404, { error: "Rota não encontrada" });
     } catch (error) { return json(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
   });
@@ -125,4 +135,4 @@ function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, p
   return server;
 }
 if (require.main === module) startAgentServer();
-module.exports = { agentConfig, startAgentServer };
+module.exports = { agentConfig, startAgentServer, terminateProcessTree };

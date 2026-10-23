@@ -7,7 +7,7 @@
   box-shadow: 0 18px 50px rgba(0, 0, 0, .18);
 }
 
-.runner-watch-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 0 18px 18px; }
+.runner-watch-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 0 18px 18px; }
 .runner-watch { min-width: 0; padding: 12px; border: 1px solid #2a3552; border-radius: 12px; background: linear-gradient(145deg, #171e30, #101622); }
 .runner-watch header { display: flex; align-items: center; gap: 8px; }
 .runner-watch header img { width: 31px; height: 31px; padding: 1px; border: 1px solid #647dbd; border-radius: 7px; image-rendering: pixelated; }
@@ -16,12 +16,22 @@
 .runner-watch header strong { color: #e4eaff; font-size: .68rem; }
 .runner-watch header span { margin-top: 2px; color: #8f9bb9; font-size: .55rem; }
 .runner-watch header>i { width: 7px; height: 7px; border-radius: 50%; }
+.runner-identity { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.runner-identity>span { min-width: 0; flex: 1; }
+.runner-identity strong,.runner-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runner-identity small { margin-top: 2px; color: #8f9bb9; font-size: .55rem; }
 .runner-watch>p { overflow: hidden; min-height: 29px; margin: 11px 0 8px; color: #abb6d2; font-size: .6rem; line-height: 1.4; text-overflow: ellipsis; }
 .limit-bar { height: 5px; overflow: hidden; border-radius: 99px; background: #2a3551; }
 .limit-bar i { display: block; height: 100%; border-radius: inherit; background: #62dcac; }
 .limit-bar.warning i { background: #ffce69; }.limit-bar.danger i { background: #fa7180; }
 .runner-watch footer { display: flex; align-items: center; gap: 5px; margin-top: 7px; color: #8b97b8; font-size: .55rem; }
 .runner-watch footer b { color: #dae4ff; }.runner-watch footer em { margin-left: auto; color: #7180a1; font-style: normal; white-space: nowrap; }.runner-watch .limit-empty { color: #687596; }
+.team-heading-actions { display: flex; align-items: center; gap: 12px; }
+.team-heading-actions span { color: #98a2bf; font-size: .65rem; }
+.team-heading-actions button { border: 1px solid #498578; border-radius: 8px; padding: 8px 11px; background: #183d35; color: #c9f7df; font-size: .63rem; font-weight: 800; cursor: pointer; }
+.runner-limit-editor { margin-top: 11px; border-top: 1px solid #28344f; padding-top: 9px; }
+.runner-limit-editor summary { color: #91a3c9; font-size: .57rem; font-weight: 800; cursor: pointer; }
+.runner-limit-editor .usage-config.compact { margin: 9px 0 0; padding: 0; border: 0; background: transparent; }
 
 .usage-config { display: grid; gap: 8px; margin-top: 16px; padding: 12px; border: 1px solid #3c4d75; border-radius: 12px; background: #121b2d; }
 .usage-config>div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.usage-config>div:first-child span { color: #b2c1ee; font: 500 .53rem "DM Mono", monospace; letter-spacing: .1em; }.usage-config>div:first-child b { color: #d5e2ff; font-size: .58rem; }.usage-config>p { margin: 0; color: #8d9ab9; font-size: .58rem; line-height: 1.4; }

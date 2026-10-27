@@ -1,5 +1,6 @@
 :root {
   color-scheme: dark;
+  font-family: "Poppins", sans-serif;
   --mireva-bg: #0b0b0c;
   --mireva-surface: #141415;
   --mireva-surface-raised: #19191a;
@@ -24,11 +25,56 @@ body {
   color: var(--mireva-text);
 }
 
+html,
+body,
+#root,
+.office-app,
+.office-app * {
+  font-family: "Poppins", sans-serif !important;
+}
+
 button,
 input,
 select,
 textarea {
   font: inherit;
+}
+
+.svg-inline--fa {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+}
+
+button:has(> .svg-inline--fa),
+button > span:has(> .svg-inline--fa),
+.state-chip,
+.panel-heading > p {
+  align-items: center;
+}
+
+button:has(> .svg-inline--fa),
+.state-chip {
+  gap: 7px;
+}
+
+button:has(> .svg-inline--fa) {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.state-chip {
+  display: inline-flex;
+}
+
+.panel-heading > p,
+.notification-toast > strong {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.panel-heading > p {
+  justify-content: center;
 }
 
 button:focus-visible,
@@ -872,4 +918,193 @@ button.danger,
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* Full-canvas layout and shared action hierarchy. */
+body {
+  background: #101011;
+}
+
+.office-app.has-sidebar {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  box-shadow: none;
+}
+
+.orchestrator-backdrop {
+  padding: 0 !important;
+  background: #101011 !important;
+}
+
+.orchestrator-workspace {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.activity-section,
+.monitoring-section,
+.team-directory,
+.flow-section,
+.settings-card,
+.git-results,
+.inbox-grid > section {
+  border-radius: 10px !important;
+}
+
+.activity-list article:only-child {
+  grid-column: 1 / -1;
+}
+
+:where(
+  .nav-connect,
+  .control-center-card > button,
+  .orchestrator-workspace > header button,
+  .chat-composer button,
+  .chat-dispatch,
+  .chat-plan button:first-child,
+  .chat-review button:first-of-type,
+  .start-local-button,
+  .room-setup-form > button,
+  .connect-bar button,
+  .team-heading-actions button,
+  .team-directory .section-heading button,
+  .team-empty button,
+  .settings-card > button,
+  .settings-actions button:not(.secondary),
+  .decision-item button:not(.secondary):not(.danger),
+  .git-runners button:not(.secondary),
+  .error-card footer button:not(.secondary):not(.warning),
+  .station-config button,
+  .agent-chat button,
+  .orchestrator-permissions button,
+  .project-memory button,
+  .generated-command button,
+  .usage-config button,
+  .add-runner-button,
+  .dispatch-button
+) {
+  min-height: 38px;
+  padding: 9px 13px !important;
+  border: 1px solid #f2f2f3 !important;
+  border-radius: 8px !important;
+  background: #f2f2f3 !important;
+  color: #0c0c0d !important;
+  box-shadow: none !important;
+  font-size: .67rem !important;
+  font-weight: 700 !important;
+  line-height: 1.2;
+  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+}
+
+:where(
+  .nav-connect,
+  .control-center-card > button,
+  .orchestrator-workspace > header button,
+  .chat-composer button,
+  .chat-dispatch,
+  .chat-plan button:first-child,
+  .chat-review button:first-of-type,
+  .start-local-button,
+  .room-setup-form > button,
+  .connect-bar button,
+  .team-heading-actions button,
+  .team-directory .section-heading button,
+  .team-empty button,
+  .settings-card > button,
+  .settings-actions button:not(.secondary),
+  .decision-item button:not(.secondary):not(.danger),
+  .git-runners button:not(.secondary),
+  .error-card footer button:not(.secondary):not(.warning),
+  .station-config button,
+  .agent-chat button,
+  .orchestrator-permissions button,
+  .project-memory button,
+  .generated-command button,
+  .usage-config button,
+  .add-runner-button,
+  .dispatch-button
+):hover:not(:disabled) {
+  border-color: #fff !important;
+  background: #fff !important;
+  color: #050506 !important;
+  transform: translateY(-1px);
+}
+
+:where(
+  .nav-sound,
+  .modal-close,
+  .diagnostic-button,
+  button.secondary,
+  .decision-item button.secondary,
+  .git-runners button.secondary,
+  .git-control button.secondary,
+  .chat-plan button + button,
+  .chat-review button + button
+) {
+  border: 1px solid #3c3c40 !important;
+  border-radius: 8px !important;
+  background: #0b0b0c !important;
+  color: #f2f2f3 !important;
+  box-shadow: none !important;
+  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+}
+
+:where(
+  .diagnostic-button,
+  button.secondary,
+  .decision-item button.secondary,
+  .git-runners button.secondary,
+  .git-control button.secondary,
+  .chat-plan button + button,
+  .chat-review button + button,
+  button.danger,
+  .decision-item button.danger,
+  .error-card footer button.warning
+) {
+  min-height: 38px;
+  padding: 9px 13px !important;
+  font-size: .67rem !important;
+  font-weight: 700 !important;
+  line-height: 1.2;
+}
+
+.nav-sound {
+  min-height: 38px;
+  padding: 0 !important;
+}
+
+:where(
+  .nav-sound,
+  .modal-close,
+  .diagnostic-button,
+  button.secondary,
+  .decision-item button.secondary,
+  .git-runners button.secondary,
+  .git-control button.secondary,
+  .chat-plan button + button,
+  .chat-review button + button
+):hover:not(:disabled) {
+  border-color: #f2f2f3 !important;
+  background: #151516 !important;
+  color: #fff !important;
+  transform: translateY(-1px);
+}
+
+.nav-sound.enabled {
+  border-color: #f2f2f3 !important;
+  background: #0b0b0c !important;
+  color: #fff !important;
+}
+
+.room-setup-tabs button.active {
+  background: #f2f2f3 !important;
+  color: #0c0c0d !important;
+}
+
+button:disabled {
+  opacity: .42 !important;
+  transform: none !important;
+  cursor: not-allowed !important;
 }

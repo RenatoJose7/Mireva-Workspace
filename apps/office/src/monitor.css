@@ -34,7 +34,7 @@
 .runner-limit-editor .usage-config.compact { margin: 9px 0 0; padding: 0; border: 0; background: transparent; }
 
 .usage-config { display: grid; gap: 8px; margin-top: 16px; padding: 12px; border: 1px solid #3c4d75; border-radius: 12px; background: #121b2d; }
-.usage-config>div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.usage-config>div:first-child span { color: #b2c1ee; font: 500 .53rem "DM Mono", monospace; letter-spacing: .1em; }.usage-config>div:first-child b { color: #d5e2ff; font-size: .58rem; }.usage-config>p { margin: 0; color: #8d9ab9; font-size: .58rem; line-height: 1.4; }
+.usage-config>div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 8px; }.usage-config>div:first-child span { color: #b2c1ee; font: 500 .53rem "Poppins",sans-serif; letter-spacing: .1em; }.usage-config>div:first-child b { color: #d5e2ff; font-size: .58rem; }.usage-config>p { margin: 0; color: #8d9ab9; font-size: .58rem; line-height: 1.4; }
 .usage-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }.usage-fields label { display: grid; gap: 4px; color: #aeb9d7; font-size: .56rem; font-weight: 700; }.usage-fields input { width: 100%; border: 1px solid #354363; border-radius: 6px; padding: 7px; background: #0c1220; color: #e7edff; font-size: .62rem; outline: none; }.usage-fields input:focus { border-color: #7895f9; }
 .usage-config button { border: 1px solid #4a6b97; border-radius: 7px; padding: 8px; background: #223a62; color: #d6e6ff; font-size: .6rem; font-weight: 800; cursor: pointer; }.usage-config button:disabled { opacity: .45; cursor: not-allowed; }
 

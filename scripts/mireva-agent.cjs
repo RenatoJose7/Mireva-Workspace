@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require("node:child_process");
 
 const DEFAULT_HUB = "https://mireva-hub.renatojosesfc.workers.dev";
 const PNPM_VERSION = "11.25.0";
-const AGENT_CONFIG_VERSION = 5;
+const AGENT_CONFIG_VERSION = 7;
 const configFile = () => join(process.env.MIREVA_HOME || join(homedir(), ".mireva"), "agent.json");
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 function agentConfig() {
@@ -20,21 +20,30 @@ function agentConfig() {
   // detached agents can survive a terminal/PC restart; rotating the endpoint
   // endpoint lets an updated launcher start cleanly instead of talking to a
   // stale process that still has the old bridge code in memory.
-  const config = { version: AGENT_CONFIG_VERSION, port: 49325, token: randomBytes(24).toString("hex"), legacy: previous?.token && previous?.port ? { port: previous.port, token: previous.token } : undefined };
+  const config = { version: AGENT_CONFIG_VERSION, port: 49327, token: randomBytes(24).toString("hex"), legacy: previous?.token && previous?.port ? { port: previous.port, token: previous.token } : undefined };
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   return config;
 }
 function json(response, status, body) { response.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "content-type,x-mireva-token", "access-control-allow-methods": "GET,POST,OPTIONS" }); response.end(JSON.stringify(body)); }
 async function body(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); }
+function codexConfiguredModel() {
+  try {
+    const config = readFileSync(join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml"), "utf8");
+    return config.match(/^model\s*=\s*["']([^"']+)["']/m)?.[1]?.trim() || null;
+  } catch { return null; }
+}
 function valid(input) {
   if (!/^[A-Z0-9]{8}$/.test(String(input.roomCode ?? "").toUpperCase())) throw new Error("Código da sala inválido");
-  if (!["copilot", "codex", "mock"].includes(input.agent)) throw new Error("IA não suportada");
+  if (!["copilot", "codex", "claude", "antigravity", "mock"].includes(input.agent)) throw new Error("IA não suportada");
   if (!["GENERAL", "ORCHESTRATOR", "DEVELOPMENT", "RESEARCH", "TEST", "REVIEW"].includes(input.role)) throw new Error("Função inválida");
   if (typeof input.name !== "string" || !input.name.trim() || input.name.length > 80) throw new Error("Informe um nome para a estação");
   const projectDirectory = resolve(String(input.projectDirectory ?? process.cwd()));
   if (!existsSync(projectDirectory)) throw new Error("A pasta do projeto não existe neste computador");
   const permissionProfile = ["READ_ONLY", "PROJECT", "PROJECT_NETWORK", "FULL"].includes(input.permissionProfile) ? input.permissionProfile : input.role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT";
-  return { roomCode: input.roomCode.toUpperCase(), hub: String(input.hub || DEFAULT_HUB).replace(/\/$/, ""), name: input.name.trim(), agent: input.agent, role: input.role, capabilities: Array.isArray(input.capabilities) ? input.capabilities.map(String).map((value) => value.trim().toUpperCase()).filter(Boolean).slice(0, 12) : [], permissionProfile, projectDirectory };
+  const requestedModel = String(input.model ?? "").trim();
+  const model = requestedModel || (input.agent === "codex" ? codexConfiguredModel() : null);
+  if (model && (model.length > 120 || /[\r\n]/.test(model))) throw new Error("Modelo inválido");
+  return { roomCode: input.roomCode.toUpperCase(), hub: String(input.hub || DEFAULT_HUB).replace(/\/$/, ""), name: input.name.trim(), agent: input.agent, model, role: input.role, capabilities: Array.isArray(input.capabilities) ? input.capabilities.map(String).map((value) => value.trim().toUpperCase()).filter(Boolean).slice(0, 12) : [], permissionProfile, projectDirectory };
 }
 // The runtime uses Corepack/npx to install dependencies, which does not place a
 // `pnpm` executable in its node_modules/.bin directory. Invoke the pinned
@@ -53,9 +62,9 @@ function terminateProcessTree(child) {
   try { process.kill(-child.pid, "SIGTERM"); }
   catch { try { child.kill(); } catch {} }
 }
-function runJoin(runtime, input, state) { return new Promise((resolve, reject) => { const child = command(runtime, ["join", input.roomCode, "--hub", input.hub, "--name", input.name, "--agent", input.agent, "--role", input.role, "--capabilities", input.capabilities.join(","), "--permissions", input.permissionProfile, "--state", state], { cwd: input.projectDirectory, stdio: "pipe" }); let error = ""; child.stderr.on("data", (chunk) => { error += chunk; }); child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(error.trim() || "Não foi possível entrar na sala"))); }); }
+function runJoin(runtime, input, state) { return new Promise((resolve, reject) => { const modelArgs = input.model ? ["--model", input.model] : []; const child = command(runtime, ["join", input.roomCode, "--hub", input.hub, "--name", input.name, "--agent", input.agent, ...modelArgs, "--role", input.role, "--capabilities", input.capabilities.join(","), "--permissions", input.permissionProfile, "--state", state], { cwd: input.projectDirectory, stdio: "pipe" }); let error = ""; child.stderr.on("data", (chunk) => { error += chunk; }); child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(error.trim() || "Não foi possível entrar na sala"))); }); }
 function canReuseState(state, input) {
-  try { const saved = JSON.parse(readFileSync(state, "utf8")); return saved.roomCode === input.roomCode && String(saved.hubUrl ?? "").replace(/\/$/, "") === input.hub && Boolean(saved.participantId); }
+  try { const saved = JSON.parse(readFileSync(state, "utf8")); return saved.roomCode === input.roomCode && String(saved.hubUrl ?? "").replace(/\/$/, "") === input.hub && saved.agent === input.agent && (saved.model ?? null) === (input.model ?? null) && Boolean(saved.participantId); }
   catch { return false; }
 }
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -73,21 +82,25 @@ async function verifyStartup(child, log) {
   }
   if (child.exitCode !== null) throw new Error(logTail(log) || `A IA encerrou ao iniciar (código ${child.exitCode})`);
 }
+function agentCommand(agent) { return agent === "antigravity" ? "agy" : agent; }
 function programCheck(agent) {
   if (agent === "mock") return { ok: true, detail: "Adapter de teste disponível" };
-  const result = spawnSync(executable(agent), ["--version"], { encoding: "utf8", windowsHide: true });
-  return result.status === 0 ? { ok: true, detail: (result.stdout || result.stderr || "Instalado").trim().split("\n")[0] } : { ok: false, detail: `${agent} não foi encontrado no PATH`, fix: agent === "codex" ? "Instale com npm install -g @openai/codex" : "Instale a GitHub Copilot CLI e abra copilot uma vez para autenticar" };
+  const commandName = agentCommand(agent); const result = spawnSync(executable(commandName), ["--version"], { encoding: "utf8", windowsHide: true });
+  const fixes = { codex: "Instale com npm install -g @openai/codex", copilot: "Instale a GitHub Copilot CLI e abra copilot uma vez para autenticar", claude: "Instale o Claude Code e abra claude uma vez para autenticar", antigravity: "Instale o Antigravity CLI e abra agy uma vez para autenticar" };
+  return result.status === 0 ? { ok: true, detail: (result.stdout || result.stderr || "Instalado").trim().split("\n")[0] } : { ok: false, detail: `${commandName} não foi encontrado no PATH`, fix: fixes[agent] || "Instale o CLI deste provider" };
 }
 async function diagnostics(input) {
-  const projectDirectory = resolve(String(input.projectDirectory ?? process.cwd())); const checks = [];
+  const projectDirectory = resolve(String(input.projectDirectory ?? process.cwd())); const checks = []; const model = String(input.model ?? "").trim() || (input.agent === "codex" ? codexConfiguredModel() : null); let models = input.agent === "claude" ? ["sonnet", "opus"] : [];
   try { accessSync(projectDirectory, constants.R_OK); checks.push({ key: "folder-read", status: "ok", title: "Pasta legível", detail: projectDirectory }); } catch { checks.push({ key: "folder-read", status: "error", title: "Pasta inacessível", detail: projectDirectory, fix: "Escolha uma pasta existente com permissão de leitura" }); }
   try { accessSync(projectDirectory, constants.W_OK); checks.push({ key: "folder-write", status: "ok", title: "Pasta gravável", detail: "A IA pode alterar arquivos nesta pasta" }); } catch { checks.push({ key: "folder-write", status: "error", title: "Sem permissão de escrita", detail: projectDirectory, fix: "Ajuste as permissões da pasta ou use Somente leitura" }); }
-  const program = programCheck(input.agent); checks.push({ key: "provider", status: program.ok ? "ok" : "error", title: program.ok ? `${input.agent} instalado` : `${input.agent} indisponível`, detail: program.detail, fix: program.fix });
+  const program = programCheck(input.agent); checks.push({ key: "provider", status: program.ok ? "ok" : "error", title: program.ok ? `${input.agent} instalado` : `${input.agent} indisponível`, detail: `${program.detail}${input.agent !== "copilot" && input.agent !== "mock" ? ` · modelo: ${model || "padrão do provider"}` : ""}`, fix: program.fix });
   if (input.agent === "codex" && program.ok) { const auth = spawnSync(executable("codex"), ["login", "status"], { encoding: "utf8", windowsHide: true }); checks.push({ key: "auth", status: auth.status === 0 ? "ok" : "error", title: auth.status === 0 ? "Codex autenticado" : "Login do Codex necessário", detail: (auth.stdout || auth.stderr || "").trim(), fix: auth.status === 0 ? undefined : "Execute codex login no terminal" }); }
+  else if (input.agent === "claude" && program.ok) { const auth = spawnSync(executable("claude"), ["auth", "status"], { encoding: "utf8", windowsHide: true }); checks.push({ key: "auth", status: auth.status === 0 ? "ok" : "error", title: auth.status === 0 ? "Claude autenticado" : "Login do Claude necessário", detail: (auth.stdout || auth.stderr || "").trim(), fix: auth.status === 0 ? undefined : "Abra claude no terminal e conclua o login" }); }
+  else if (input.agent === "antigravity" && program.ok) { const auth = spawnSync(executable("agy"), ["models"], { encoding: "utf8", windowsHide: true, timeout: 30_000 }); const modelOutput = String(auth.stdout || auth.stderr || ""); models = [...new Set(modelOutput.match(/\b(?:gemini|claude)-[a-z0-9][a-z0-9.-]*\b/gi) || [])]; checks.push({ key: "auth", status: auth.status === 0 ? "ok" : "error", title: auth.status === 0 ? "Antigravity autenticado" : "Login do Antigravity necessário", detail: modelOutput.trim().split("\n").slice(0, 4).join("\n"), fix: auth.status === 0 ? undefined : "Abra agy no terminal e conclua o login" }); }
   else checks.push({ key: "auth", status: program.ok ? "warning" : "error", title: input.agent === "copilot" ? "Login confirmado ao iniciar" : "Autenticação", detail: input.agent === "copilot" ? "A Copilot CLI valida a sessão na primeira execução" : "Não aplicável", fix: input.agent === "copilot" ? "Se falhar, abra copilot no terminal e conclua o login" : undefined });
   try { const response = await fetch(`${String(input.hub || DEFAULT_HUB).replace(/\/$/, "")}/health`, { signal: AbortSignal.timeout(5_000) }); checks.push({ key: "hub", status: response.ok ? "ok" : "error", title: response.ok ? "Hub acessível" : "Hub respondeu com erro", detail: `HTTP ${response.status}`, fix: response.ok ? undefined : "Confira a internet ou o endereço do Hub" }); }
   catch (error) { checks.push({ key: "hub", status: "error", title: "Hub inacessível", detail: error instanceof Error ? error.message : String(error), fix: "Confira a conexão com a internet e tente novamente" }); }
-  return { ok: !checks.some((check) => check.status === "error"), checkedAt: new Date().toISOString(), projectDirectory, checks };
+  return { ok: !checks.some((check) => check.status === "error"), checkedAt: new Date().toISOString(), projectDirectory, model, models, checks };
 }
 async function reportStartupFailure(stateFile, cause) {
   try { const state = JSON.parse(readFileSync(stateFile, "utf8")); const details = cause instanceof Error ? cause.stack || cause.message : String(cause); const text = details.toLowerCase(); const auth = /auth|login|não autentic|not authenticated/.test(text); const missing = /enoent|command not found|não encontrado|cannot find/.test(text); const payload = { code: auth ? "AUTH_REQUIRED" : missing ? "TOOL_MISSING" : "STARTUP_FAILED", title: auth ? "Login necessário" : missing ? "Ferramenta não encontrada" : "Runner não iniciou", message: auth ? "A IA precisa ser autenticada neste computador." : missing ? "A ferramenta da IA não foi encontrada no PATH." : "O processo do runner encerrou durante a inicialização.", operation: "START_RUNNER", retryable: true, suggestedAction: auth ? "Abra a IA no terminal, conclua o login e tente novamente." : missing ? "Execute o diagnóstico e instale a ferramenta indicada." : "Confira o log local e tente iniciar a estação novamente.", taskId: null, technicalDetails: details, occurredAt: new Date().toISOString(), state: auth ? "AUTH_REQUIRED" : "BLOCKED" }; const base = String(state.hubUrl).replace(/\/$/, ""); await fetch(`${base}/rooms/${state.roomCode}/events`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: state.participantId, kind: "RUNNER_ERROR", payload }) }); await fetch(`${base}/rooms/${state.roomCode}/presence`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: state.participantId, state: payload.state }) }); } catch {}
@@ -115,16 +128,17 @@ function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, p
     if (request.headers["x-mireva-token"] !== token) return json(response, 401, { error: "Mireva Agent não autorizado" });
     try {
       const url = new URL(request.url, "http://127.0.0.1");
-      if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { ok: true, sessions: [...sessions.values()].map((session) => ({ id: session.id, name: session.name, agent: session.agent, role: session.role, projectDirectory: session.projectDirectory, log: session.log, startedAt: session.startedAt, restartedAt: session.restartedAt, restartCount: session.restartCount, running: session.child.exitCode === null && !session.stopped })) });
+      if (request.method === "GET" && url.pathname === "/health") return json(response, 200, { ok: true, sessions: [...sessions.values()].map((session) => ({ id: session.id, name: session.name, agent: session.agent, model: session.model ?? null, role: session.role, projectDirectory: session.projectDirectory, log: session.log, startedAt: session.startedAt, restartedAt: session.restartedAt, restartCount: session.restartCount, running: session.child.exitCode === null && !session.stopped })) });
       if (request.method === "POST" && url.pathname === "/diagnostics") return json(response, 200, await diagnostics(await body(request)));
       const sessionLog = url.pathname.match(/^\/sessions\/([^/]+)\/log$/);
       if (request.method === "GET" && sessionLog) { const session = sessions.get(sessionLog[1]); if (!session) return json(response, 404, { error: "Runner não encontrado" }); return json(response, 200, { id: session.id, log: logTail(session.log), filename: session.log }); }
       if (request.method === "POST" && url.pathname === "/connect") {
         const input = valid(await body(request));
-        const activeSession = [...sessions.values()].find((session) => !session.stopped && session.name === input.name && session.agent === input.agent && session.projectDirectory === input.projectDirectory && session.child.exitCode === null);
-        if (activeSession) return json(response, 200, { id: activeSession.id, log: activeSession.log, reused: true });
+        const activeSession = [...sessions.values()].find((session) => !session.stopped && session.name === input.name && session.agent === input.agent && (session.model ?? null) === (input.model ?? null) && session.projectDirectory === input.projectDirectory && session.child.exitCode === null);
+        if (activeSession) return json(response, 200, { id: activeSession.id, log: activeSession.log, model: activeSession.model ?? null, reused: true });
+        for (const previous of sessions.values()) if (!previous.stopped && previous.name === input.name && previous.projectDirectory === input.projectDirectory) { previous.stopped = true; if (previous.timer) clearTimeout(previous.timer); terminateProcessTree(previous.child); }
         const session = await launch(input); try { await verifyStartup(session.child, session.log); } catch (error) { await reportStartupFailure(session.state, error); throw error; }
-        return json(response, 201, { id: session.id, log: session.log });
+        return json(response, 201, { id: session.id, log: session.log, model: session.model ?? null });
       }
       const stop = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/);
       if (request.method === "POST" && stop) { const session = sessions.get(stop[1]); if (!session) return json(response, 404, { error: "Runner não encontrado nesta sessão" }); session.stopped = true; if (session.timer) clearTimeout(session.timer); terminateProcessTree(session.child); persistSessions(); return json(response, 200, { stopped: true }); }

@@ -40,7 +40,7 @@ Ambiente colaborativo para coordenar agentes de IA que trabalham em clones indep
 - Presença com recuperação: runners inativos aparecem como desconectados, o supervisor local tenta reiniciá-los e tarefas interrompidas retornam à fila sem aceitar resultados de uma execução antiga.
 - Tarefas com dependências, prioridade, tentativa, resultado e ciclo `READY → CLAIMED → RUNNING → REVIEW → DONE`.
 - Runner automático: busca, reivindica e executa a próxima tarefa compatível.
-- Adaptadores `mock`, `codex` e `copilot`. Os adaptadores Codex e GitHub Copilot chamam o CLI instalado no computador, encaminham os eventos para a sala e mantêm o runner ativo durante a execução.
+- Adaptadores `mock`, `codex`, `copilot`, `claude` e `antigravity`. Os adapters reais chamam o CLI instalado no computador, encaminham os eventos para a sala e mantêm o runner ativo durante a execução.
 - Office web inicial que mostra participantes, tarefas e eventos reais da sala.
 - Central de erros persistente com diagnóstico técnico, tentativa novamente, exportação e liberação de permissão por tarefa ou estação.
 - Caixa de decisões para aprovar planos e entregas, liberar retomadas e cancelar ou corrigir uma tarefa em execução.
@@ -129,6 +129,25 @@ pnpm cli work -- --state .mireva\runner-copilot.json --adapter copilot
 ```
 
 O Mireva chama `copilot -p` dentro do diretório em que o comando foi iniciado e traduz a política da estação para as opções de permissão do Copilot CLI. Isso evita prompts invisíveis no runner não interativo. Publicação e `sudo` permanecem negados no perfil normal; depois da entrega, a tarefa aparece em `REVIEW` para aprovação humana.
+
+### Claude Code
+
+Instale e autentique o Claude Code, depois escolha `Claude Code` na conexão guiada. O modelo pode ser um alias, como `sonnet` ou `opus`, ou um ID completo aceito pelo CLI:
+
+```bash
+npx @renatojose7/mireva connect CODIGO --name "Claude Backend" --agent claude --model sonnet --role DEVELOPMENT --capabilities CODE,TEST,GIT
+```
+
+### Gemini via Antigravity
+
+Instale o Antigravity CLI e conclua o login abrindo `agy`. Consulte os modelos disponíveis com `agy models` e informe o slug escolhido ao conectar a estação:
+
+```bash
+agy models
+npx @renatojose7/mireva connect CODIGO --name "Gemini Research" --agent antigravity --model gemini-3.8-flash-medium --role RESEARCH --capabilities RESEARCH,CODE
+```
+
+Claude e Antigravity também podem ser usados como orquestradores. A seleção feita no Office é persistida no participante e encaminhada em cada conversa, plano e tarefa.
 
 ## Conversar com o orquestrador
 

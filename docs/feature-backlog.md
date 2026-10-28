@@ -25,6 +25,20 @@ Permitir que cada estação receba um perfil especializado composto por uma ou m
 - Uma tarefa pode exigir uma ou várias skills.
 - Perfis reutilizáveis podem combinar várias skills, como `Redator SEO`, `Editor de vídeo` ou `Frontend React`.
 
+### Integração com Claude, Antigravity e modelos — concluída na 0.1.11
+
+Claude Code e Antigravity foram adicionados como providers reais ao lado de Codex, Copilot e mock.
+
+- Criar um adapter `antigravity` isolado em `packages/agent-adapters`.
+- Permitir selecionar o modelo Gemini disponível ao conectar ou editar uma estação.
+- Usar o provider tanto como orquestrador quanto como runner especializado.
+- Detectar capacidades, contexto suportado e recursos multimodais de cada modelo.
+- Exibir provider e modelo ativos nas páginas Escritório e Equipe.
+- Capturar saída, erros, arquivos alterados, consumo e estado da execução no formato comum do Mireva.
+- Manter o modelo desacoplado das skills: a mesma IA pode assumir pesquisa, roteiro, design ou outra especialidade configurada.
+- Conexão oficial definida pelo CLI `agy`, com execução headless, diagnóstico de autenticação e descoberta por `agy models`.
+- Claude usa o CLI `claude`, aceita aliases ou IDs completos de modelo e pode atuar como runner ou orquestrador.
+
 ## Skills iniciais sugeridas
 
 - Desenvolvimento frontend e UI.

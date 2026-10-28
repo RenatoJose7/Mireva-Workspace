@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { CodexCliAdapter, CopilotCliAdapter, MockAgentAdapter, isProjectPlanningAdapter, type AgentAdapter } from "@mireva/agent-adapters";
+import { AntigravityCliAdapter, ClaudeCliAdapter, CodexCliAdapter, CopilotCliAdapter, MockAgentAdapter, isProjectPlanningAdapter, type AgentAdapter } from "@mireva/agent-adapters";
 import { AdapterProjectPlanner, DirectMessageWorker, GitControlWorker, MirevaOrchestrator, MirevaRunner, OrchestratorWorker, RunnerTaskWorker, joinRunner, type RunnerConfig } from "@mireva/runner";
 type PermissionProfile = "READ_ONLY" | "PROJECT" | "PROJECT_NETWORK" | "FULL";
 
@@ -16,7 +16,9 @@ const createAdapter = (name: string): AgentAdapter => {
   if (name === "mock") return new MockAgentAdapter();
   if (name === "codex") return new CodexCliAdapter();
   if (name === "copilot") return new CopilotCliAdapter();
-  throw new Error(`Adapter não suportado: ${name}. Use mock, codex ou copilot.`);
+  if (name === "claude") return new ClaudeCliAdapter();
+  if (name === "antigravity") return new AntigravityCliAdapter();
+  throw new Error(`Adapter não suportado: ${name}. Use mock, codex, copilot, claude ou antigravity.`);
 };
 
 async function run(): Promise<void> {
@@ -27,7 +29,7 @@ async function run(): Promise<void> {
     const hub = value("--hub", "http://127.0.0.1:8787")!; const response = await fetch(`${hub}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: value("--name", "Mireva room"), ownerName: value("--owner", "owner") }) });
     if (!response.ok) throw new Error(await response.text()); return output(await response.json());
   }
-  if (command === "join") { const code = args[1]; if (!code) throw new Error("Usage: mireva join CODIGO --name NAME --agent AGENT"); const capabilities = value("--capabilities", "")!.split(",").map((capability) => capability.trim()).filter(Boolean); const role = value("--role", "GENERAL") as RunnerConfig["role"]; const config = await joinRunner(value("--hub", "http://127.0.0.1:8787")!, code, value("--name", "runner")!, value("--agent", "mock")!, capabilities, role, value("--permissions", role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT") as PermissionProfile); await saveState(config); return output(config); }
+  if (command === "join") { const code = args[1]; if (!code) throw new Error("Usage: mireva join CODIGO --name NAME --agent AGENT"); const capabilities = value("--capabilities", "")!.split(",").map((capability) => capability.trim()).filter(Boolean); const role = value("--role", "GENERAL") as RunnerConfig["role"]; const config = await joinRunner(value("--hub", "http://127.0.0.1:8787")!, code, value("--name", "runner")!, value("--agent", "mock")!, capabilities, role, value("--permissions", role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT") as PermissionProfile, value("--model") ?? null); await saveState(config); return output(config); }
   if (command === "task-create") { const runner = new MirevaRunner(await loadState()); const title = value("--title"); if (!title) throw new Error("Usage: mireva task-create --title TITULO"); return output(await runner.createTask({ title, description: value("--description", ""), dependencies: value("--dependencies", "")!.split(",").filter(Boolean), priority: Number(value("--priority", "50")), requiredCapabilities: value("--capabilities", "")!.split(",").map((capability) => capability.trim()).filter(Boolean), acceptanceCriteria: value("--acceptance", "")!.split("|").filter(Boolean) })); }
   if (command === "tasks") { const runner = new MirevaRunner(await loadState()); return output(await runner.availableTasks()); }
   if (command === "task-claim") { const taskId = args[1]; if (!taskId) throw new Error("Usage: mireva task-claim ID"); return output(await new MirevaRunner(await loadState()).claimTask(taskId)); }
@@ -52,7 +54,7 @@ async function run(): Promise<void> {
     const config = await loadState(); const adapter = createAdapter(value("--adapter", "codex")!);
     const detection = await adapter.detect(); if (!detection.installed) throw new Error(detection.reason ?? `Adapter ${adapter.id} não instalado`);
     const authentication = await adapter.checkAuthentication(); if (!authentication.authenticated) throw new Error(authentication.reason ?? `Adapter ${adapter.id} não autenticado`);
-    if (!isProjectPlanningAdapter(adapter)) throw new Error(`O adapter ${adapter.id} ainda não cria planos. Use codex ou copilot.`);
+    if (!isProjectPlanningAdapter(adapter)) throw new Error(`O adapter ${adapter.id} ainda não cria planos. Use codex, copilot, claude ou antigravity.`);
     const runner = new MirevaRunner(config, { onEvent: (event) => output({ event }) });
     await runner.setPresence("AVAILABLE");
     const recovered = await runner.recover(); if (recovered.length) output({ recovered: recovered.map((task) => task.id), message: "Execuções interrompidas foram recuperadas" });
@@ -67,5 +69,5 @@ async function run(): Promise<void> {
   if (command === "leave") { await rm(stateFile(), { force: true }); return output({ left: true }); }
   throw new Error(`Unknown command: ${command}`);
 }
-function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot [--project-dir PASTA], orchestrate --adapter codex|copilot [--project-dir PASTA], status, agents, task-create, tasks, task-claim ID, task-update ID, limit-report, doctor --adapter mock|codex|copilot, leave"); }
+function usage(): void { console.log("Mireva CLI\nCommands: init, login, create, join CODIGO, start, work --adapter mock|codex|copilot|claude|antigravity [--project-dir PASTA], orchestrate --adapter codex|copilot|claude|antigravity [--project-dir PASTA], status, agents, task-create, tasks, task-claim ID, task-update ID, limit-report, doctor --adapter mock|codex|copilot|claude|antigravity, leave"); }
 run().catch((error: unknown) => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });

@@ -27,7 +27,7 @@ export type Room = z.infer<typeof roomSchema>;
 
 export const participantSchema = z.object({
   id: z.string(), roomId: z.string(), name: z.string(), agent: z.string(), state: agentStateSchema,
-  role: agentRoleSchema.default("GENERAL"), capabilities: z.array(z.string()).default([]), permissionProfile: permissionProfileSchema.default("PROJECT"), paused: z.boolean().default(false), usage: providerUsageSchema.nullable().default(null), joinedAt: z.string(), lastSeenAt: z.string(),
+  model: z.string().min(1).max(120).nullable().default(null), role: agentRoleSchema.default("GENERAL"), capabilities: z.array(z.string()).default([]), permissionProfile: permissionProfileSchema.default("PROJECT"), paused: z.boolean().default(false), usage: providerUsageSchema.nullable().default(null), joinedAt: z.string(), lastSeenAt: z.string(),
 });
 export type Participant = z.infer<typeof participantSchema>;
 
@@ -54,7 +54,7 @@ export const planSchema = z.object({ id: z.string(), roomId: z.string(), request
 export type OrchestrationPlanRecord = z.infer<typeof planSchema>;
 
 export const createRoomSchema = z.object({ name: z.string().min(1).max(100), ownerName: z.string().min(1).max(80) });
-export const joinRoomSchema = z.object({ name: z.string().min(1).max(80), agent: z.string().min(1).max(80), role: agentRoleSchema.default("GENERAL"), capabilities: z.array(z.string()).default([]), permissionProfile: permissionProfileSchema.default("PROJECT") });
+export const joinRoomSchema = z.object({ name: z.string().min(1).max(80), agent: z.string().min(1).max(80), model: z.string().min(1).max(120).nullable().default(null), role: agentRoleSchema.default("GENERAL"), capabilities: z.array(z.string()).default([]), permissionProfile: permissionProfileSchema.default("PROJECT") });
 export const configureParticipantSchema = z.object({ ownerId: z.string().uuid(), role: agentRoleSchema, capabilities: z.array(z.string().min(1).max(40)).max(12), permissionProfile: permissionProfileSchema.default("PROJECT") });
 export const reportUsageSchema = z.object({ reporterId: z.string().uuid(), used: z.number().nonnegative(), limit: z.number().positive(), unit: z.string().min(1).max(30).default("créditos"), resetAt: z.string().datetime().nullable().default(null) });
 export const postEventSchema = z.object({ kind: eventKindSchema, payload: z.record(z.string(), z.unknown()).default({}) });

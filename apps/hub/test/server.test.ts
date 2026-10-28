@@ -40,7 +40,10 @@ describe("local hub", () => {
     const task = await fetch(`${hub.url}/rooms/${created.room.code}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Interrompida" }) }).then((r) => r.json()) as { id: string };
     await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id }) });
     const raw = (hub.store as unknown as { data: { rooms: Record<string, { participants: Array<{ id: string; lastSeenAt: string }> }> } }).data;
-    raw.rooms[created.room.code]!.participants.find((entry) => entry.id === runner.id)!.lastSeenAt = new Date(Date.now() - 21_000).toISOString();
+    raw.rooms[created.room.code]!.participants.find((entry) => entry.id === runner.id)!.lastSeenAt = new Date(Date.now() - 30_000).toISOString();
+    const withinGrace = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; state: string }> };
+    expect(withinGrace.participants.find((entry) => entry.id === runner.id)?.state).not.toBe("DISCONNECTED");
+    raw.rooms[created.room.code]!.participants.find((entry) => entry.id === runner.id)!.lastSeenAt = new Date(Date.now() - 61_000).toISOString();
     const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; state: string }>; tasks: Array<{ id: string; status: string; assignedParticipantId: string | null }> };
     expect(snapshot.participants.find((entry) => entry.id === runner.id)?.state).toBe("DISCONNECTED");
     expect(snapshot.tasks.find((entry) => entry.id === task.id)).toMatchObject({ status: "READY", assignedParticipantId: null });
@@ -54,6 +57,14 @@ describe("local hub", () => {
     expect(updated).toEqual(expect.objectContaining({ role: "DEVELOPMENT", capabilities: ["CODE", "TEST"] }));
     const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; role: string; capabilities: string[] }> };
     expect(snapshot.participants.find((participant) => participant.id === runner.id)).toMatchObject({ role: "DEVELOPMENT", capabilities: ["CODE", "TEST"] });
+  });
+  it("stores the model selected for a runner", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mireva-model-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
+    const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Models", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
+    const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Codex", agent: "codex", model: "gpt-5.6-sol" }) }).then((r) => r.json()) as { id: string; model: string };
+    expect(runner.model).toBe("gpt-5.6-sol");
+    const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; model: string | null }> };
+    expect(snapshot.participants.find((participant) => participant.id === runner.id)?.model).toBe("gpt-5.6-sol");
   });
   it("stores a runner limit report from the runner itself", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mireva-usage-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });

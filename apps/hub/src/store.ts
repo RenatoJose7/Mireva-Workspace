@@ -20,7 +20,7 @@ export class LocalHubStore {
   async createRoom(name: string, ownerName: string): Promise<{ room: Room; owner: Participant }> {
     const id = randomUUID(); const ownerId = randomUUID(); const createdAt = now();
     const room: Room = { id, code: roomCode(), name, ownerId, createdAt };
-    const owner: Participant = { id: ownerId, roomId: id, name: ownerName, agent: "human", state: "AVAILABLE", role: "GENERAL", capabilities: [], permissionProfile: "READ_ONLY", paused: false, usage: null, joinedAt: createdAt, lastSeenAt: createdAt };
+    const owner: Participant = { id: ownerId, roomId: id, name: ownerName, agent: "human", model: null, state: "AVAILABLE", role: "GENERAL", capabilities: [], permissionProfile: "READ_ONLY", paused: false, usage: null, joinedAt: createdAt, lastSeenAt: createdAt };
     this.data.rooms[room.code] = { room, participants: [owner], tasks: [], plans: [], projectMemory: "", events: [], lastSequence: 0 };
     await this.save(); return { room, owner };
   }
@@ -33,12 +33,12 @@ export class LocalHubStore {
     found.events ??= [];
     const { events: _events, ...snapshot } = found; return structuredClone(snapshot);
   }
-  async join(code: string, name: string, agent: string, role: Participant["role"] = "GENERAL", capabilities: string[] = [], permissionProfile: PermissionProfile = "PROJECT"): Promise<Participant | undefined> {
+  async join(code: string, name: string, agent: string, model: string | null = null, role: Participant["role"] = "GENERAL", capabilities: string[] = [], permissionProfile: PermissionProfile = "PROJECT"): Promise<Participant | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined;
     found.tasks ??= [];
     found.events ??= [];
     if (found.participants.length >= 6) throw new Error("Room capacity reached");
-    const participant: Participant = { id: randomUUID(), roomId: found.room.id, name, agent, state: "AVAILABLE", role, capabilities, permissionProfile, paused: false, usage: null, joinedAt: now(), lastSeenAt: now() };
+    const participant: Participant = { id: randomUUID(), roomId: found.room.id, name, agent, model, state: "AVAILABLE", role, capabilities, permissionProfile, paused: false, usage: null, joinedAt: now(), lastSeenAt: now() };
     found.participants.push(participant); await this.append(found, "PARTICIPANT_JOINED", participant.id, { participant }); await this.save(); return structuredClone(participant);
   }
   async presence(code: string, participantId: string, state: AgentState): Promise<boolean> {
@@ -180,9 +180,9 @@ export class LocalHubStore {
     room.events.push(event); return event;
   }
   private async refreshPresence(room: StoredRoom): Promise<void> {
-    const cutoff = Date.now() - 20_000; let changed = false;
+    const cutoff = Date.now() - 60_000; let changed = false;
     room.projectMemory ??= "";
-    for (const participant of room.participants) { participant.role ??= "GENERAL"; participant.capabilities ??= []; participant.permissionProfile ??= participant.role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT"; participant.paused ??= false; participant.usage ??= null; if (!participant.paused && participant.state !== "DISCONNECTED" && Date.parse(participant.lastSeenAt) < cutoff) { participant.state = "DISCONNECTED"; await this.append(room, "PRESENCE", participant.id, { state: "DISCONNECTED" }); changed = true; } }
+    for (const participant of room.participants) { participant.model ??= null; participant.role ??= "GENERAL"; participant.capabilities ??= []; participant.permissionProfile ??= participant.role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT"; participant.paused ??= false; participant.usage ??= null; if (!participant.paused && participant.state !== "DISCONNECTED" && Date.parse(participant.lastSeenAt) < cutoff) { participant.state = "DISCONNECTED"; await this.append(room, "PRESENCE", participant.id, { state: "DISCONNECTED" }); changed = true; } }
     for (const task of room.tasks) if (task.assignedParticipantId && ["CLAIMED", "RUNNING"].includes(task.status) && room.participants.some((participant) => participant.id === task.assignedParticipantId && participant.state === "DISCONNECTED")) { task.status = task.attempts >= task.maxAttempts ? "BLOCKED" : "READY"; task.assignedParticipantId = null; task.executionId = null; task.updatedAt = now(); await this.append(room, "RUNNER_RECOVERED", null, { taskId: task.id, status: task.status, reason: "ASSIGNEE_DISCONNECTED" }); changed = true; }
     if (changed) await this.save();
   }

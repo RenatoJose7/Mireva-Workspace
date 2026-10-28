@@ -2,13 +2,13 @@ export type AgentCapability = "CODE" | "RESEARCH" | "TEST" | "GIT" | "STRUCTURED
 export type AgentPermissionProfile = "READ_ONLY" | "PROJECT" | "PROJECT_NETWORK" | "FULL";
 export interface AdapterDetection { installed: boolean; version?: string; reason?: string }
 export interface AdapterAuthentication { authenticated: boolean; reason?: string }
-export interface AgentExecutionRequest { taskId: string; title: string; instructions: string; workingDirectory: string; context: string[]; permissionProfile?: AgentPermissionProfile }
-export interface AgentConversationRequest { message: string; workingDirectory: string; context: string[]; permissionProfile?: AgentPermissionProfile }
+export interface AgentExecutionRequest { taskId: string; title: string; instructions: string; workingDirectory: string; context: string[]; permissionProfile?: AgentPermissionProfile; model?: string | null }
+export interface AgentConversationRequest { message: string; workingDirectory: string; context: string[]; permissionProfile?: AgentPermissionProfile; model?: string | null }
 export type AgentExecutionEvent = { type: "STARTED" | "PROGRESS" | "LOG" | "COMPLETED" | "FAILED" | "CANCELLED"; message: string; at: string };
 export interface AgentExecutionResult { taskId: string; status: "COMPLETED" | "FAILED" | "CANCELLED"; summary: string; files: string[]; branch?: string; startedAt: string; completedAt: string }
 export interface AgentPlanTask { title: string; description: string; dependencies: number[]; priority: number; requiredCapabilities: string[]; acceptanceCriteria: string[] }
 export interface AgentPlan { summary: string; tasks: AgentPlanTask[] }
-export interface AgentPlanningRequest { request: string; workingDirectory: string; projectContext: string; permissionProfile?: AgentPermissionProfile }
+export interface AgentPlanningRequest { request: string; workingDirectory: string; projectContext: string; permissionProfile?: AgentPermissionProfile; model?: string | null }
 export interface ProjectPlanningAdapter { planProject(request: AgentPlanningRequest): Promise<AgentPlan> }
 
 export interface AgentAdapter {
@@ -44,3 +44,5 @@ export class MockAgentAdapter implements AgentAdapter {
 
 export { CodexCliAdapter, buildCodexExecArgs, buildCodexPlanningPrompt, buildCodexPrompt, codexGlobalArgs, codexPermissionArgs, parseCodexPlanOutput } from "./codex.js";
 export { CopilotCliAdapter, buildCopilotPlanningPrompt, buildCopilotPrompt, copilotPermissionArgs, parseAgentPlan, parseCopilotPlan } from "./copilot.js";
+export { ClaudeCliAdapter, buildClaudeArgs, claudePermissionArgs, parseClaudeResponse } from "./claude.js";
+export { AntigravityCliAdapter, antigravityPermissionArgs, buildAntigravityArgs, parseAntigravityResponse } from "./antigravity.js";

@@ -39,9 +39,9 @@ Uso:
   npx @renatojose7/mireva setup
   npx @renatojose7/mireva office
   npx @renatojose7/mireva agent
-  npx @renatojose7/mireva connect CODIGO --name "Copilot" --agent copilot --role DEVELOPMENT --capabilities CODE,GIT
-  npx @renatojose7/mireva join CODIGO --name "Copilot" --agent copilot
-  npx @renatojose7/mireva work --adapter copilot
+  npx @renatojose7/mireva connect CODIGO --name "Claude" --agent claude --model sonnet --role DEVELOPMENT --capabilities CODE,GIT
+  npx @renatojose7/mireva join CODIGO --name "Gemini" --agent antigravity --model gemini-3.8-flash-medium
+  npx @renatojose7/mireva work --adapter antigravity
 
 O primeiro comando baixa o runtime, prepara a pasta atual e abre o Office.
 O comando connect entra na sala e mantém o runner trabalhando com um único comando.
@@ -84,6 +84,10 @@ function option(args, flag) {
   const index = args.indexOf(flag);
   return index >= 0 ? args[index + 1] : undefined;
 }
+function configuredCodexModel() {
+  try { return readFileSync(join(process.env.CODEX_HOME || join(homedir(), ".codex"), "config.toml"), "utf8").match(/^model\s*=\s*["']([^"']+)["']/m)?.[1]?.trim(); }
+  catch { return undefined; }
+}
 function removeOption(args, flag) {
   const clean = [];
   let value;
@@ -107,12 +111,14 @@ function runCli(cliCommand, suppliedArgs) {
 }
 function runConnect(suppliedArgs) {
   const roomCode = suppliedArgs[0];
-  if (!roomCode || roomCode.startsWith("-")) fail("use `mireva connect CODIGO_DA_SALA --name NOME --agent copilot|codex`");
+  if (!roomCode || roomCode.startsWith("-")) fail("use `mireva connect CODIGO_DA_SALA --name NOME --agent copilot|codex|claude|antigravity`");
   const connectionArgs = suppliedArgs.slice(1);
   const agent = option(connectionArgs, "--agent") ?? "copilot";
   const role = option(connectionArgs, "--role") ?? "GENERAL";
   if (!option(connectionArgs, "--name")) fail("informe um nome com `--name` para identificar este runner no escritório");
-  if (!["copilot", "codex", "mock"].includes(agent)) fail("agent deve ser copilot, codex ou mock");
+  if (!["copilot", "codex", "claude", "antigravity", "mock"].includes(agent)) fail("agent deve ser copilot, codex, claude, antigravity ou mock");
+  const detectedModel = agent === "codex" && !option(connectionArgs, "--model") ? configuredCodexModel() : undefined;
+  if (detectedModel) connectionArgs.push("--model", detectedModel);
   runCli("join", [roomCode, ...connectionArgs]);
   runCli(role === "ORCHESTRATOR" ? "orchestrate" : "work", [...connectionArgs, "--adapter", agent]);
 }

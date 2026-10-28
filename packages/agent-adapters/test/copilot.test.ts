@@ -11,7 +11,10 @@ describe("CopilotCliAdapter", () => {
   it("parses a structured plan returned by the CLI", () => {
     const plan = parseCopilotPlan('```json\n{"summary":"Base e tela","tasks":[{"title":"Base","description":"Criar a base","dependencies":[],"priority":70,"requiredCapabilities":["CODE"],"acceptanceCriteria":["Compila"]},{"title":"Tela","description":"Criar tela","dependencies":[0],"priority":50,"requiredCapabilities":["CODE"],"acceptanceCriteria":[]}]}\n```');
     expect(plan.tasks[1]).toMatchObject({ dependencies: [0], requiredCapabilities: ["CODE"] });
-    expect(buildCopilotPlanningPrompt({ request: "Criar app", workingDirectory: ".", projectContext: "Agentes: []" })).toContain("SOMENTE com JSON válido");
+    const prompt = buildCopilotPlanningPrompt({ request: "Criar app", workingDirectory: ".", projectContext: "Agentes: []" });
+    expect(prompt).toContain("SOMENTE com JSON válido");
+    expect(prompt).toContain("Uma aprovação do plano deve bastar");
+    expect(prompt).toContain("2 a 5 tópicos");
   });
   it("accepts a conversational reply without tasks", () => {
     expect(parseCopilotPlan('{"summary":"Qual público você quer atender?","tasks":[]}')).toEqual({ summary: "Qual público você quer atender?", tasks: [] });

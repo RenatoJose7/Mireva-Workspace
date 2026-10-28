@@ -2,7 +2,7 @@ import type { AgentAdapter, AgentExecutionRequest, AgentPlan, ProjectPlanningAda
 import type { AgentRole, AgentState, HubSnapshot, OrchestrationPlanRecord, Participant, PermissionProfile, RoomEvent, RunnerError, Task } from "@mireva/protocol";
 import { spawn } from "node:child_process";
 
-export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; role?: AgentRole; capabilities: string[]; lastSequence: number }
+export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; model?: string | null; role?: AgentRole; capabilities: string[]; lastSequence: number }
 export interface RunnerCallbacks { onEvent?(event: RoomEvent): void; onError?(error: Error): void }
 export type ClassifiedRunnerError = RunnerError & { state: AgentState; requiredPermission?: PermissionProfile };
 export function classifyRunnerError(cause: unknown, operation: string, taskId: string | null = null): ClassifiedRunnerError {
@@ -63,17 +63,17 @@ export class MirevaRunner {
   }
 }
 
-export async function joinRunner(hubUrl: string, roomCode: string, name: string, agent: string, capabilities: string[] = [], role: AgentRole = "GENERAL", permissionProfile: PermissionProfile = role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT"): Promise<RunnerConfig> {
-  const response = await fetch(`${hubUrl}/rooms/${roomCode}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, agent, role, capabilities, permissionProfile }) });
+export async function joinRunner(hubUrl: string, roomCode: string, name: string, agent: string, capabilities: string[] = [], role: AgentRole = "GENERAL", permissionProfile: PermissionProfile = role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT", model: string | null = null): Promise<RunnerConfig> {
+  const response = await fetch(`${hubUrl}/rooms/${roomCode}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, agent, model, role, capabilities, permissionProfile }) });
   if (!response.ok) throw new Error(`Could not join room: ${await response.text()}`);
   const participant = await response.json() as Participant;
-  return { hubUrl, roomCode, participantId: participant.id, name, agent, role, capabilities, lastSequence: 0 };
+  return { hubUrl, roomCode, participantId: participant.id, name, agent, model: participant.model, role, capabilities, lastSequence: 0 };
 }
 
 export class AgentTaskExecutor {
   constructor(private readonly runner: MirevaRunner, private readonly adapter: AgentAdapter) {}
   async execute(task: Task, workingDirectory: string, context: string[] = [], permissionProfile: PermissionProfile = "PROJECT"): Promise<void> {
-    const request: AgentExecutionRequest = { taskId: task.id, title: task.title, instructions: task.description, workingDirectory, context, permissionProfile };
+    const request: AgentExecutionRequest = { taskId: task.id, title: task.title, instructions: task.description, workingDirectory, context, permissionProfile, model: this.runner.config.model };
     await this.runner.setPresence("EXECUTING");
     await this.runner.updateTask(task.id, "RUNNING", undefined, task.executionId ?? undefined);
     const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
@@ -135,9 +135,9 @@ export interface ProjectPlanner { plan(input: { request: string; snapshot: HubSn
 export class AdapterProjectPlanner implements ProjectPlanner {
   constructor(private readonly adapter: ProjectPlanningAdapter, private readonly workingDirectory: string) {}
   async plan(input: { request: string; snapshot: HubSnapshot }): Promise<OrchestrationPlan> {
-    const projectContext = JSON.stringify({ room: input.snapshot.room.name, projectMemory: input.snapshot.projectMemory ?? "", agents: input.snapshot.participants.map((participant) => ({ name: participant.name, agent: participant.agent, state: participant.state, capabilities: participant.capabilities ?? [] })), currentTasks: input.snapshot.tasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).map((task) => ({ title: task.title, status: task.status, requiredCapabilities: task.requiredCapabilities, dependencies: task.dependencies })) }, null, 2);
+    const projectContext = JSON.stringify({ room: input.snapshot.room.name, projectMemory: input.snapshot.projectMemory ?? "", agents: input.snapshot.participants.map((participant) => ({ name: participant.name, agent: participant.agent, model: participant.model, state: participant.state, capabilities: participant.capabilities ?? [] })), currentTasks: input.snapshot.tasks.filter((task) => !["DONE", "CANCELLED"].includes(task.status)).map((task) => ({ title: task.title, status: task.status, requiredCapabilities: task.requiredCapabilities, dependencies: task.dependencies })) }, null, 2);
     const orchestrator = input.snapshot.participants.find((participant) => participant.role === "ORCHESTRATOR");
-    return this.adapter.planProject({ request: input.request, workingDirectory: this.workingDirectory, projectContext, permissionProfile: orchestrator?.permissionProfile ?? "READ_ONLY" }) as Promise<AgentPlan>;
+    return this.adapter.planProject({ request: input.request, workingDirectory: this.workingDirectory, projectContext, permissionProfile: orchestrator?.permissionProfile ?? "READ_ONLY", model: orchestrator?.model }) as Promise<AgentPlan>;
   }
 }
 
@@ -155,7 +155,7 @@ export class DirectMessageWorker {
     const heartbeat = setInterval(() => void this.runner.heartbeat().catch(() => undefined), 5_000);
     let finalState: AgentState = "AVAILABLE";
     try {
-      const response = await this.adapter.respondToMessage({ message: String(message.payload.message), workingDirectory: this.workingDirectory, context, permissionProfile: participant?.permissionProfile ?? "PROJECT" });
+      const response = await this.adapter.respondToMessage({ message: String(message.payload.message), workingDirectory: this.workingDirectory, context, permissionProfile: participant?.permissionProfile ?? "PROJECT", model: participant?.model ?? this.runner.config.model });
       await this.runner.publish("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: response });
       return message.id;
     } catch (error: unknown) {

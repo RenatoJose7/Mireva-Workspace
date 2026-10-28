@@ -53,7 +53,7 @@ export class CodexCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     return parseCodexPlanOutput(outcome.output);
   }
   async executeTask(request: AgentExecutionRequest): Promise<void> {
-    if (this.executions.has(request.taskId)) throw new Error("Task already executing");
+    const previous = this.executions.get(request.taskId); if (previous && !previous.result) throw new Error("Task already executing"); if (previous) this.executions.delete(request.taskId);
     const startedAt = at(); const child = spawn("codex", buildCodexExecArgs(request.permissionProfile, ["--json", "--skip-git-repo-check", "-C", request.workingDirectory, buildCodexPrompt(request)], request.model), { stdio: "pipe", windowsHide: true });
     // `codex exec` reads any open stdin after the positional prompt. Closing
     // the pipe is essential; otherwise it waits forever for another message.
@@ -67,7 +67,7 @@ export class CodexCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
   }
   async *streamEvents(taskId: string): AsyncIterable<AgentExecutionEvent> { const execution = this.executions.get(taskId); if (!execution) return; let index = 0; while (!execution.result || index < execution.events.length) { while (index < execution.events.length) yield execution.events[index++]!; if (!execution.result) await new Promise((resolve) => setTimeout(resolve, 100)); } }
   async cancelTask(taskId: string): Promise<void> { const execution = this.executions.get(taskId); if (!execution || execution.result) return; execution.process.kill(); await this.finish(taskId, execution.events[0]!.at, "Cancelada pelo operador", "CANCELLED"); }
-  async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { return this.executions.get(taskId)?.result; }
+  async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { const result = this.executions.get(taskId)?.result; if (result) this.executions.delete(taskId); return result; }
   private async finish(taskId: string, startedAt: string, summary: string, status: AgentExecutionResult["status"]): Promise<void> {
     const execution = this.executions.get(taskId); if (!execution || execution.result) return;
     if (execution.timeout) clearTimeout(execution.timeout);

@@ -33,12 +33,13 @@ describe("local hub", () => {
     const available = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/available`).then((r) => r.json()) as Array<{ id: string }>;
     expect(available.map((task) => task.id)).toEqual([second.id]);
   });
-  it("marks stale participants as disconnected when the room is read", async () => {
+  it("marks stale participants as disconnected without duplicating their active task", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mireva-presence-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
     const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Presence", ownerName: "Owner" }) }).then((r) => r.json()) as { room: { code: string } };
     const runner = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Runner", agent: "mock" }) }).then((r) => r.json()) as { id: string };
     const task = await fetch(`${hub.url}/rooms/${created.room.code}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Interrompida" }) }).then((r) => r.json()) as { id: string };
-    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id }) });
+    const claimed = await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id }) }).then((response) => response.json()) as { executionId: string };
+    await fetch(`${hub.url}/rooms/${created.room.code}/tasks/${task.id}/status`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: runner.id, executionId: claimed.executionId, status: "RUNNING" }) });
     const raw = (hub.store as unknown as { data: { rooms: Record<string, { participants: Array<{ id: string; lastSeenAt: string }> }> } }).data;
     raw.rooms[created.room.code]!.participants.find((entry) => entry.id === runner.id)!.lastSeenAt = new Date(Date.now() - 30_000).toISOString();
     const withinGrace = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; state: string }> };
@@ -46,7 +47,18 @@ describe("local hub", () => {
     raw.rooms[created.room.code]!.participants.find((entry) => entry.id === runner.id)!.lastSeenAt = new Date(Date.now() - 61_000).toISOString();
     const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((r) => r.json()) as { participants: Array<{ id: string; state: string }>; tasks: Array<{ id: string; status: string; assignedParticipantId: string | null }> };
     expect(snapshot.participants.find((entry) => entry.id === runner.id)?.state).toBe("DISCONNECTED");
-    expect(snapshot.tasks.find((entry) => entry.id === task.id)).toMatchObject({ status: "READY", assignedParticipantId: null });
+    expect(snapshot.tasks.find((entry) => entry.id === task.id)).toMatchObject({ status: "RUNNING", assignedParticipantId: runner.id });
+  });
+  it("reconnects a full-room station with the same identity and updates its model", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mireva-reconnect-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });
+    const created = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Reconnect", ownerName: "Owner" }) }).then((response) => response.json()) as { room: { code: string } };
+    const stations: Array<{ id: string }> = [];
+    for (let index = 0; index < 5; index += 1) stations.push(await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: `Station ${index + 1}`, agent: "codex", model: "gpt-old" }) }).then((response) => response.json()) as { id: string });
+    const response = await fetch(`${hub.url}/rooms/${created.room.code}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId: stations[0]!.id, name: "Station 1", agent: "codex", model: "gpt-new", role: "ORCHESTRATOR", capabilities: ["ORCHESTRATE"], permissionProfile: "FULL" }) });
+    expect(response.ok).toBe(true);
+    expect(await response.json()).toEqual(expect.objectContaining({ id: stations[0]!.id, model: "gpt-new", role: "ORCHESTRATOR", state: "AVAILABLE" }));
+    const snapshot = await fetch(`${hub.url}/rooms/${created.room.code}`).then((result) => result.json()) as { participants: Array<{ id: string }> };
+    expect(snapshot.participants).toHaveLength(6);
   });
   it("lets the room owner configure a runner role and capabilities", async () => {
     const dir = await mkdtemp(join(tmpdir(), "mireva-roles-")); hub = await startLocalHub({ dataFile: join(dir, "hub.json") });

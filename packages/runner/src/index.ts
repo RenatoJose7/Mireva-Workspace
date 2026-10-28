@@ -5,8 +5,15 @@ import { spawn } from "node:child_process";
 export interface RunnerConfig { hubUrl: string; roomCode: string; participantId: string; name: string; agent: string; model?: string | null; role?: AgentRole; capabilities: string[]; lastSequence: number }
 export interface RunnerCallbacks { onEvent?(event: RoomEvent): void; onError?(error: Error): void }
 export type ClassifiedRunnerError = RunnerError & { state: AgentState; requiredPermission?: PermissionProfile };
+export class HubConnectionError extends Error {
+  readonly code = "HUB_UNAVAILABLE";
+  constructor(public readonly path: string, cause?: unknown) { super(`Hub temporariamente indisponível em ${path}${cause instanceof Error ? `: ${cause.message}` : ""}`, { cause }); this.name = "HubConnectionError"; }
+}
+const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const limitText = (value: string, maximum: number): string => value.length <= maximum ? value : `${value.slice(0, maximum - 1).trimEnd()}…`;
 export function classifyRunnerError(cause: unknown, operation: string, taskId: string | null = null): ClassifiedRunnerError {
   const technicalDetails = cause instanceof Error ? cause.stack ?? cause.message : String(cause); const text = technicalDetails.toLowerCase(); const occurredAt = new Date().toISOString();
+  if (cause instanceof HubConnectionError) return { code: "HUB_UNAVAILABLE", title: "Hub temporariamente indisponível", message: "A estação perdeu contato com o Hub, mas isso não significa que a IA perdeu a internet.", operation, retryable: true, suggestedAction: "Aguarde a sala sincronizar novamente. O Mireva tentará reenviar os eventos pendentes.", taskId, technicalDetails, occurredAt, state: "NO_NETWORK" };
   if (/auth|login|not authenticated|não autentic/.test(text)) return { code: "AUTH_REQUIRED", title: "Login necessário", message: "A IA precisa ser autenticada neste computador.", operation, retryable: true, suggestedAction: "Abra a IA no terminal, conclua o login e tente novamente.", taskId, technicalDetails, occurredAt, state: "AUTH_REQUIRED" };
   if (/429|rate.?limit|quota|credit|crédito|usage limit/.test(text)) return { code: "RATE_LIMITED", title: "Limite do provedor atingido", message: "O provedor interrompeu a execução por limite de uso.", operation, retryable: true, suggestedAction: "Aguarde a renovação do limite ou troque a IA responsável.", taskId, technicalDetails, occurredAt, state: "RATE_LIMITED" };
   if (/enotfound|econnrefused|network|internet|fetch failed|socket|dns/.test(text)) return { code: "NO_NETWORK", title: "Sem conexão", message: "A IA não conseguiu acessar a rede necessária para continuar.", operation, retryable: true, suggestedAction: "Verifique a internet e use o perfil Projeto + internet quando a tarefa precisar acessar URLs.", taskId, technicalDetails, occurredAt, state: "NO_NETWORK", requiredPermission: "PROJECT_NETWORK" };
@@ -19,16 +26,22 @@ export function classifyRunnerError(cause: unknown, operation: string, taskId: s
 export class MirevaRunner {
   private timer: NodeJS.Timeout | undefined;
   private state: AgentState = "AVAILABLE";
+  private readonly pendingEvents: Array<{ kind: RoomEvent["kind"]; payload: Record<string, unknown> }> = [];
+  private flushingEvents: Promise<void> | undefined;
   constructor(public readonly config: RunnerConfig, private readonly callbacks: RunnerCallbacks = {}) {}
 
   async publish(kind: RoomEvent["kind"], payload: Record<string, unknown>): Promise<RoomEvent> {
     return this.request(`/rooms/${this.config.roomCode}/events`, { method: "POST", body: { participantId: this.config.participantId, kind, payload } }) as Promise<RoomEvent>;
   }
+  async publishEventually(kind: RoomEvent["kind"], payload: Record<string, unknown>): Promise<void> {
+    this.pendingEvents.push({ kind, payload });
+    await this.flushPendingEvents();
+  }
   async setPresence(state: AgentState): Promise<void> {
     this.state = state;
     await this.request(`/rooms/${this.config.roomCode}/presence`, { method: "POST", body: { participantId: this.config.participantId, state } });
   }
-  async heartbeat(): Promise<void> { await this.setPresence(this.state); }
+  async heartbeat(): Promise<void> { await this.setPresence(this.state); await this.flushPendingEvents(); }
   async createTask(input: { title: string; description?: string; dependencies?: string[]; priority?: number; requiredCapabilities?: string[]; acceptanceCriteria?: string[] }): Promise<Task> {
     return this.request(`/rooms/${this.config.roomCode}/tasks`, { method: "POST", body: input }) as Promise<Task>;
   }
@@ -39,10 +52,17 @@ export class MirevaRunner {
     return this.request(`/rooms/${this.config.roomCode}/participants/${this.config.participantId}/usage`, { method: "POST", body: { reporterId: this.config.participantId, used: input.used, limit: input.limit, unit: input.unit ?? "créditos", resetAt: input.resetAt ?? null } }) as Promise<Participant>;
   }
   async snapshot(): Promise<HubSnapshot> { return this.request(`/rooms/${this.config.roomCode}`) as Promise<HubSnapshot>; }
-  async createPlan(input: { request: string; summary: string; tasks: OrchestrationPlanRecord["tasks"] }): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans`, { method: "POST", body: { participantId: this.config.participantId, ...input } }) as Promise<OrchestrationPlanRecord>; }
+  async createPlan(input: { request: string; summary: string; tasks: OrchestrationPlanRecord["tasks"] }): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans`, { method: "POST", body: { participantId: this.config.participantId, ...input, request: limitText(input.request, 20_000), summary: limitText(input.summary, 20_000) } }) as Promise<OrchestrationPlanRecord>; }
   async decidePlan(planId: string, status: "APPROVED" | "REJECTED"): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans/${planId}/decision`, { method: "POST", body: { ownerId: this.config.participantId, status } }) as Promise<OrchestrationPlanRecord>; }
   async claimTask(taskId: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/claim`, { method: "POST", body: { participantId: this.config.participantId } }) as Promise<Task>; }
-  async updateTask(taskId: string, status: Task["status"], result?: string, executionId?: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/status`, { method: "POST", body: { participantId: this.config.participantId, status, result, executionId } }) as Promise<Task>; }
+  async updateTask(taskId: string, status: Task["status"], result?: string, executionId?: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/status`, { method: "POST", body: { participantId: this.config.participantId, status, result: result === undefined ? undefined : limitText(result, 20_000), executionId } }) as Promise<Task>; }
+  async updateTaskWhenConnected(taskId: string, status: Task["status"], result?: string, executionId?: string): Promise<Task> {
+    let delay = 500;
+    for (;;) {
+      try { return await this.updateTask(taskId, status, result, executionId); }
+      catch (error) { if (!(error instanceof HubConnectionError)) throw error; await wait(delay); delay = Math.min(5_000, delay * 2); }
+    }
+  }
   async recover(): Promise<Task[]> { return this.request(`/rooms/${this.config.roomCode}/participants/${this.config.participantId}/recover`, { method: "POST" }) as Promise<Task[]>; }
   async events(after = 0): Promise<RoomEvent[]> { return this.request(`/rooms/${this.config.roomCode}/events?after=${after}&participantId=${this.config.participantId}`) as Promise<RoomEvent[]>; }
   async poll(): Promise<RoomEvent[]> {
@@ -56,15 +76,29 @@ export class MirevaRunner {
     void tick(); this.timer = setInterval(() => void tick(), intervalMs);
   }
   stop(): void { if (this.timer) clearInterval(this.timer); this.timer = undefined; }
+  private async flushPendingEvents(): Promise<void> {
+    if (this.flushingEvents) return this.flushingEvents;
+    this.flushingEvents = (async () => {
+      while (this.pendingEvents.length) {
+        const event = this.pendingEvents[0]!;
+        try { await this.publish(event.kind, event.payload); this.pendingEvents.shift(); }
+        catch { return; }
+      }
+    })();
+    try { await this.flushingEvents; } finally { this.flushingEvents = undefined; }
+  }
   private async request(path: string, options: { method?: string; body?: Record<string, unknown> } = {}): Promise<unknown> {
-    const response = await fetch(`${this.config.hubUrl}${path}`, { method: options.method ?? "GET", headers: options.body ? { "content-type": "application/json" } : undefined, body: options.body ? JSON.stringify(options.body) : undefined });
+    let response: Response;
+    try { response = await fetch(`${this.config.hubUrl}${path}`, { method: options.method ?? "GET", headers: options.body ? { "content-type": "application/json" } : undefined, body: options.body ? JSON.stringify(options.body) : undefined, signal: AbortSignal.timeout(10_000) }); }
+    catch (error) { throw new HubConnectionError(path, error); }
+    if (response.status === 429 || response.status >= 500) throw new HubConnectionError(path, new Error(`HTTP ${response.status}`));
     if (!response.ok) throw new Error(`Hub request failed (${response.status}): ${await response.text()}`);
     return response.status === 204 ? undefined : response.json();
   }
 }
 
-export async function joinRunner(hubUrl: string, roomCode: string, name: string, agent: string, capabilities: string[] = [], role: AgentRole = "GENERAL", permissionProfile: PermissionProfile = role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT", model: string | null = null): Promise<RunnerConfig> {
-  const response = await fetch(`${hubUrl}/rooms/${roomCode}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, agent, model, role, capabilities, permissionProfile }) });
+export async function joinRunner(hubUrl: string, roomCode: string, name: string, agent: string, capabilities: string[] = [], role: AgentRole = "GENERAL", permissionProfile: PermissionProfile = role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT", model: string | null = null, participantId?: string): Promise<RunnerConfig> {
+  const response = await fetch(`${hubUrl}/rooms/${roomCode}/participants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ participantId, name, agent, model, role, capabilities, permissionProfile }) });
   if (!response.ok) throw new Error(`Could not join room: ${await response.text()}`);
   const participant = await response.json() as Participant;
   return { hubUrl, roomCode, participantId: participant.id, name, agent, model: participant.model, role, capabilities, lastSequence: 0 };
@@ -81,7 +115,9 @@ export class AgentTaskExecutor {
     let control: "cancel" | "intervene" | undefined;
     const checkControl = async () => {
       if (control) return;
-      const events = await this.runner.events();
+      let events: RoomEvent[];
+      try { events = await this.runner.events(); }
+      catch (error) { if (error instanceof HubConnectionError) return; throw error; }
       const request = events.find((event) => (event.kind === "TASK_CANCEL_REQUESTED" || event.kind === "TASK_INTERVENTION") && event.payload.taskId === task.id && event.payload.targetParticipantId === this.runner.config.participantId);
       if (!request) return;
       control = request.kind === "TASK_CANCEL_REQUESTED" ? "cancel" : "intervene";
@@ -89,21 +125,21 @@ export class AgentTaskExecutor {
     };
     try {
       await this.adapter.executeTask(request);
-      for await (const event of this.adapter.streamEvents(task.id)) { await checkControl(); await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, event }); }
+      for await (const event of this.adapter.streamEvents(task.id)) { await checkControl(); await this.runner.publishEventually("MESSAGE", { taskId: task.id, adapter: this.adapter.id, event }); }
       await checkControl();
       const result = await this.adapter.getResult(task.id);
       if (control === "cancel") return;
-      if (control === "intervene") { await this.runner.updateTask(task.id, "READY", "Correção recebida; aguardando nova atribuição.", task.executionId ?? undefined); return; }
-      if (result) await this.runner.publish("MESSAGE", { taskId: task.id, adapter: this.adapter.id, delivery: { status: result.status, summary: result.summary, files: result.files, branch: result.branch } });
-      if (result?.status === "COMPLETED") await this.runner.updateTask(task.id, "REVIEW", result.summary, task.executionId ?? undefined);
+      if (control === "intervene") { await this.runner.updateTaskWhenConnected(task.id, "READY", "Correção recebida; aguardando nova atribuição.", task.executionId ?? undefined); return; }
+      if (result) await this.runner.publishEventually("MESSAGE", { taskId: task.id, adapter: this.adapter.id, delivery: { status: result.status, summary: result.summary, files: result.files, branch: result.branch } });
+      if (result?.status === "COMPLETED") await this.runner.updateTaskWhenConnected(task.id, "REVIEW", result.summary, task.executionId ?? undefined);
       else throw new Error(result?.summary ?? "O agente não retornou uma entrega");
     } catch (error: unknown) {
       const failure = classifyRunnerError(error, "EXECUTE_TASK", task.id); finalState = failure.state;
-      await this.runner.publish("RUNNER_ERROR", { ...failure });
-      if (failure.requiredPermission) { await this.runner.publish("PERMISSION_REQUESTED", { taskId: task.id, errorCode: failure.code, requiredPermission: failure.requiredPermission, reason: failure.message }); await this.runner.updateTask(task.id, "WAITING_APPROVAL", failure.message, task.executionId ?? undefined); }
-      else await this.runner.updateTask(task.id, "FAILED", failure.message, task.executionId ?? undefined);
+      await this.runner.publishEventually("RUNNER_ERROR", { ...failure });
+      if (failure.requiredPermission) { await this.runner.publishEventually("PERMISSION_REQUESTED", { taskId: task.id, errorCode: failure.code, requiredPermission: failure.requiredPermission, reason: failure.message }); await this.runner.updateTaskWhenConnected(task.id, "WAITING_APPROVAL", failure.message, task.executionId ?? undefined); }
+      else await this.runner.updateTaskWhenConnected(task.id, "FAILED", failure.message, task.executionId ?? undefined);
       throw error;
-    } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState); }
+    } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState).catch(() => undefined); }
   }
 }
 

@@ -3,6 +3,7 @@ import type { AgentAdapter, AgentCapability, AgentConversationRequest, AgentPerm
 
 interface Execution { process: ChildProcessWithoutNullStreams; events: AgentExecutionEvent[]; workingDirectory: string; timeout?: NodeJS.Timeout; result?: AgentExecutionResult }
 const at = () => new Date().toISOString();
+const limitText = (value: string, maximum: number): string => value.length <= maximum ? value : `${value.slice(0, maximum - 1).trimEnd()}…`;
 export const copilotPermissionArgs = (profile: AgentPermissionProfile = "PROJECT"): string[] => {
   if (profile === "FULL") return ["--allow-all"];
   const args = ["--allow-all-tools", "--deny-tool=shell(git push)", "--deny-tool=shell(npm publish)", "--deny-tool=shell(pnpm publish)", "--deny-tool=shell(sudo:*)"];
@@ -43,9 +44,9 @@ export const parseAgentPlan = (output: string): AgentPlan => {
     if (!task || typeof task !== "object") throw new Error(`Tarefa ${index + 1} inválida no plano do Copilot`);
     const item = task as Record<string, unknown>; const dependencies = Array.isArray(item.dependencies) ? item.dependencies : [];
     if (typeof item.title !== "string" || !item.title.trim() || !dependencies.every((dependency) => Number.isInteger(dependency) && (dependency as number) >= 0 && (dependency as number) < index)) throw new Error(`Tarefa ${index + 1} inválida no plano do Copilot`);
-    return { title: item.title, description: typeof item.description === "string" ? item.description : "", dependencies: dependencies as number[], priority: typeof item.priority === "number" && Number.isInteger(item.priority) && item.priority >= 0 && item.priority <= 100 ? item.priority : 50, requiredCapabilities: Array.isArray(item.requiredCapabilities) ? item.requiredCapabilities.filter((capability): capability is string => typeof capability === "string") : [], acceptanceCriteria: Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria.filter((criterion): criterion is string => typeof criterion === "string") : [] };
+    return { title: limitText(item.title.trim(), 300), description: typeof item.description === "string" ? limitText(item.description, 8_000) : "", dependencies: dependencies as number[], priority: typeof item.priority === "number" && Number.isInteger(item.priority) && item.priority >= 0 && item.priority <= 100 ? item.priority : 50, requiredCapabilities: Array.isArray(item.requiredCapabilities) ? item.requiredCapabilities.filter((capability): capability is string => typeof capability === "string").map((capability) => limitText(capability, 40)).slice(0, 12) : [], acceptanceCriteria: Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria.filter((criterion): criterion is string => typeof criterion === "string").map((criterion) => limitText(criterion, 1_000)).slice(0, 20) : [] };
   });
-  return { summary: value.summary, tasks };
+  return { summary: limitText(value.summary.trim(), 1_200), tasks };
 };
 export const parseCopilotPlan = parseAgentPlan;
 
@@ -75,7 +76,7 @@ export class CopilotCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     return parseCopilotPlan(outcome.output);
   }
   async executeTask(request: AgentExecutionRequest): Promise<void> {
-    if (this.executions.has(request.taskId)) throw new Error("Task already executing");
+    const previous = this.executions.get(request.taskId); if (previous && !previous.result) throw new Error("Task already executing"); if (previous) this.executions.delete(request.taskId);
     const startedAt = at();
     const child = spawn(this.command, ["-s", "-p", buildCopilotPrompt(request), ...copilotPermissionArgs(request.permissionProfile)], { cwd: request.workingDirectory, stdio: "pipe", windowsHide: true });
     const execution: Execution = { process: child, workingDirectory: request.workingDirectory, events: [{ type: "STARTED", message: "GitHub Copilot iniciado", at: startedAt }] };
@@ -91,7 +92,7 @@ export class CopilotCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     while (!execution.result || index < execution.events.length) { while (index < execution.events.length) yield execution.events[index++]!; if (!execution.result) await new Promise((resolve) => setTimeout(resolve, 100)); }
   }
   async cancelTask(taskId: string): Promise<void> { const execution = this.executions.get(taskId); if (!execution || execution.result) return; execution.process.kill(); await this.finish(taskId, execution.events[0]!.at, "Cancelada pelo operador", "CANCELLED"); }
-  async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { return this.executions.get(taskId)?.result; }
+  async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { const result = this.executions.get(taskId)?.result; if (result) this.executions.delete(taskId); return result; }
   private log(execution: Execution, output: string): void { for (const line of output.split("\n").map((item) => item.trim()).filter(Boolean)) execution.events.push({ type: "LOG", message: line, at: at() }); }
   private async finish(taskId: string, startedAt: string, summary: string, status: AgentExecutionResult["status"]): Promise<void> {
     const execution = this.executions.get(taskId); if (!execution || execution.result) return;

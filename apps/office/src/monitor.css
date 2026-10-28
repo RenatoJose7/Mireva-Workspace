@@ -21,6 +21,8 @@
 .runner-identity strong,.runner-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runner-identity small { margin-top: 2px; color: #8f9bb9; font-size: .55rem; }
 .runner-watch>p { overflow: hidden; min-height: 29px; margin: 11px 0 8px; color: #abb6d2; font-size: .6rem; line-height: 1.4; text-overflow: ellipsis; }
+.runner-reconnect { width: 100%; margin: 0 0 10px; border: 1px solid #3b3b3f; border-radius: 8px; padding: 8px 10px; background: #f4f4f5; color: #09090a; font-size: .6rem; font-weight: 800; cursor: pointer; }
+.runner-reconnect:hover { background: #fff; }
 .limit-bar { height: 5px; overflow: hidden; border-radius: 99px; background: #2a3551; }
 .limit-bar i { display: block; height: 100%; border-radius: inherit; background: #62dcac; }
 .limit-bar.warning i { background: #ffce69; }.limit-bar.danger i { background: #fa7180; }

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startLocalHub, type LocalHub } from "../../../apps/hub/src/server.js";
-import { classifyRunnerError, DirectMessageWorker, joinRunner, MirevaOrchestrator, MirevaRunner, OrchestratorWorker } from "../src/index.js";
+import { classifyRunnerError, DirectMessageWorker, HubConnectionError, joinRunner, MirevaOrchestrator, MirevaRunner, OrchestratorWorker } from "../src/index.js";
 import { AgentTaskExecutor, RunnerTaskWorker } from "../src/index.js";
 import { MockAgentAdapter } from "@mireva/agent-adapters";
 
@@ -14,6 +14,7 @@ describe("MirevaRunner", () => {
   it("turns provider output into an actionable error", () => {
     expect(classifyRunnerError(new Error("permission denied by sandbox"), "EXECUTE_TASK")).toMatchObject({ code: "PERMISSION_REQUIRED", state: "WAITING_PERMISSION", requiredPermission: "FULL", retryable: true });
     expect(classifyRunnerError(new Error("429 rate limit exceeded"), "ORCHESTRATE")).toMatchObject({ code: "RATE_LIMITED", state: "RATE_LIMITED" });
+    const hubFailure = classifyRunnerError(new HubConnectionError("/events"), "EXECUTE_TASK"); expect(hubFailure).toMatchObject({ code: "HUB_UNAVAILABLE", state: "NO_NETWORK" }); expect(hubFailure).not.toHaveProperty("requiredPermission");
   });
   it("syncs an event published by a separate runner", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-runner-")), "hub.json") });
@@ -23,6 +24,16 @@ describe("MirevaRunner", () => {
     await first.publish("MESSAGE", { text: "contexto da tarefa A" });
     await second.poll();
     expect(delivered).toEqual(["contexto da tarefa A"]);
+  });
+  it("queues task events while the Hub is offline and flushes them after reconnecting", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-outbox-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Outbox", ownerName: "Owner" }) }).then((response) => response.json()) as { room: { code: string } };
+    const config = await joinRunner(hub.url, room.room.code, "Runner", "mock"); const runner = new MirevaRunner(config);
+    config.hubUrl = "http://127.0.0.1:1";
+    await expect(runner.publishEventually("MESSAGE", { text: "guardado localmente" })).resolves.toBeUndefined();
+    config.hubUrl = hub.url;
+    await runner.heartbeat();
+    expect((await runner.events()).some((event) => event.kind === "MESSAGE" && event.payload.text === "guardado localmente")).toBe(true);
   });
   it("reports the configured provider limit for the Office", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-usage-runner-")), "hub.json") });
@@ -67,6 +78,14 @@ describe("MirevaRunner", () => {
     expect(tasks.map((task) => task.status)).toEqual(["READY", "BACKLOG"]);
     expect(tasks[1]!.dependencies).toEqual([tasks[0]!.id]);
     expect(tasks[0]!.requiredCapabilities).toEqual([]);
+  });
+  it("truncates oversized plan text before sending it to the Hub", async () => {
+    hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-plan-size-")), "hub.json") });
+    const room = await fetch(`${hub.url}/rooms`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Plano longo", ownerName: "Owner" }) }).then((response) => response.json()) as { room: { code: string } };
+    const runner = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Orchestrator", "mock"));
+    const plan = await runner.createPlan({ request: "r".repeat(25_000), summary: "s".repeat(25_000), tasks: [{ title: "Executar", description: "", dependencies: [], priority: 50, requiredCapabilities: [], acceptanceCriteria: [] }] });
+    expect(plan.request).toHaveLength(20_000);
+    expect(plan.summary).toHaveLength(20_000);
   });
   it("turns an Office request into one reviewable plan only", async () => {
     hub = await startLocalHub({ dataFile: join(await mkdtemp(join(tmpdir(), "mireva-orchestrator-worker-")), "hub.json") });
@@ -123,10 +142,15 @@ describe("MirevaRunner", () => {
     const owner = new MirevaRunner({ hubUrl: hub.url, roomCode: room.room.code, participantId: room.room.ownerId, name: "Owner", agent: "human", capabilities: [], lastSequence: 0 });
     const coder = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Coder", "codex", ["CODE", "TEST"]));
     const researcher = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Researcher", "gemini", ["RESEARCH"]));
+    const orchestrator = new MirevaRunner(await joinRunner(hub.url, room.room.code, "Orchestrator", "codex", ["ORCHESTRATE"], "ORCHESTRATOR"));
     const codeTask = await owner.createTask({ title: "Implementar", requiredCapabilities: ["CODE"] });
     const researchTask = await owner.createTask({ title: "Pesquisar", requiredCapabilities: ["RESEARCH"] });
+    const specializedTask = await owner.createTask({ title: "Validar produto", requiredCapabilities: ["PRODUCT"] });
     await owner.dispatchTasks();
-    expect((await coder.assignedTasks()).map((task) => task.id)).toEqual([codeTask.id]);
-    expect((await researcher.assignedTasks()).map((task) => task.id)).toEqual([researchTask.id]);
+    expect((await coder.assignedTasks()).map((task) => task.id)).toContain(codeTask.id);
+    expect((await researcher.assignedTasks()).map((task) => task.id)).toContain(researchTask.id);
+    const specialized = (await owner.snapshot()).tasks.find((task) => task.id === specializedTask.id);
+    expect(specialized?.status).toBe("CLAIMED");
+    expect(specialized?.assignedParticipantId).not.toBe(orchestrator.config.participantId);
   });
 });

@@ -33,13 +33,14 @@ export class MockAgentAdapter implements AgentAdapter {
   async getCapabilities(): Promise<AgentCapability[]> { return ["CODE", "RESEARCH", "TEST", "GIT", "STRUCTURED_OUTPUT", "CANCEL"]; }
   async respondToMessage(request: AgentConversationRequest): Promise<string> { return `Mock respondeu: ${request.message}`; }
   async executeTask(request: AgentExecutionRequest): Promise<void> {
+    const previous = this.executions.get(request.taskId); if (previous && !previous.result) throw new Error("Task already executing"); if (previous) this.executions.delete(request.taskId);
     const startedAt = new Date().toISOString(); const execution: MockExecution = { cancelled: false, events: [{ type: "STARTED", message: `Iniciando: ${request.title}`, at: startedAt }, { type: "PROGRESS", message: "Mock executando tarefa", at: new Date().toISOString() }] };
     this.executions.set(request.taskId, execution);
     queueMicrotask(() => { if (execution.cancelled) return; const completedAt = new Date().toISOString(); execution.events.push({ type: "COMPLETED", message: "Mock concluiu a tarefa", at: completedAt }); execution.result = { taskId: request.taskId, status: "COMPLETED", summary: "Entrega simulada", files: [], startedAt, completedAt }; });
   }
   async *streamEvents(taskId: string): AsyncIterable<AgentExecutionEvent> { const execution = this.executions.get(taskId); if (!execution) return; let index = 0; while (index < execution.events.length || !execution.result) { while (index < execution.events.length) yield execution.events[index++]!; if (execution.result) return; await new Promise((resolve) => setTimeout(resolve, 1)); } }
   async cancelTask(taskId: string): Promise<void> { const execution = this.executions.get(taskId); if (!execution || execution.result) return; execution.cancelled = true; const completedAt = new Date().toISOString(); execution.events.push({ type: "CANCELLED", message: "Execução cancelada", at: completedAt }); execution.result = { taskId, status: "CANCELLED", summary: "Cancelada pelo usuário", files: [], startedAt: execution.events[0]!.at, completedAt }; }
-  async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { return this.executions.get(taskId)?.result; }
+  async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { const result = this.executions.get(taskId)?.result; if (result) this.executions.delete(taskId); return result; }
 }
 
 export { CodexCliAdapter, buildCodexExecArgs, buildCodexPlanningPrompt, buildCodexPrompt, codexGlobalArgs, codexPermissionArgs, parseCodexPlanOutput } from "./codex.js";

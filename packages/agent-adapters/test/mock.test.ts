@@ -8,5 +8,8 @@ describe("MockAgentAdapter", () => {
     expect(events).toEqual(["STARTED", "PROGRESS", "COMPLETED"]);
     expect((await adapter.getCapabilities()).includes("CANCEL")).toBe(true);
     expect((await adapter.getResult("task-1"))?.status).toBe("COMPLETED");
+    await expect(adapter.executeTask({ taskId: "task-1", title: "Retry", instructions: "", workingDirectory: ".", context: [] })).resolves.toBeUndefined();
+    for await (const _event of adapter.streamEvents("task-1")) { /* consume retry */ }
+    expect((await adapter.getResult("task-1"))?.status).toBe("COMPLETED");
   });
 });

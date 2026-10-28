@@ -64,7 +64,7 @@ export class ClaudeCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
     return parseAgentPlan(parseClaudeResponse(outcome.output));
   }
   async executeTask(request: AgentExecutionRequest): Promise<void> {
-    if (this.executions.has(request.taskId)) throw new Error("Task already executing");
+    const previous = this.executions.get(request.taskId); if (previous && !previous.result) throw new Error("Task already executing"); if (previous) this.executions.delete(request.taskId);
     const startedAt = at();
     const child = spawn(this.command, buildClaudeArgs(buildCopilotPrompt(request), request.permissionProfile, request.model, "stream-json"), { cwd: request.workingDirectory, stdio: "pipe", windowsHide: true });
     child.stdin.end();
@@ -78,7 +78,7 @@ export class ClaudeCliAdapter implements AgentAdapter, ProjectPlanningAdapter {
   }
   async *streamEvents(taskId: string): AsyncIterable<AgentExecutionEvent> { const execution = this.executions.get(taskId); if (!execution) return; let index = 0; while (!execution.result || index < execution.events.length) { while (index < execution.events.length) yield execution.events[index++]!; if (!execution.result) await new Promise((resolve) => setTimeout(resolve, 100)); } }
   async cancelTask(taskId: string): Promise<void> { const execution = this.executions.get(taskId); if (!execution || execution.result) return; execution.process.kill(); await this.finish(taskId, execution.events[0]!.at, "Cancelada pelo operador", "CANCELLED"); }
-  async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { return this.executions.get(taskId)?.result; }
+  async getResult(taskId: string): Promise<AgentExecutionResult | undefined> { const result = this.executions.get(taskId)?.result; if (result) this.executions.delete(taskId); return result; }
   private readLogs(execution: Execution, output: string): void { for (const line of output.split("\n").filter(Boolean)) { try { const parsed = JSON.parse(line) as { type?: string; message?: { content?: Array<{ type?: string; text?: string }> }; result?: string }; const text = parsed.message?.content?.filter((item) => item.type === "text").map((item) => item.text).filter(Boolean).join("\n") || parsed.result; if (text) execution.events.push({ type: "LOG", message: text, at: at() }); } catch { /* Aguarda a próxima linha JSON completa. */ } } }
   private logTail(execution: Execution): string { return execution.events.filter((event) => event.type === "LOG").slice(-6).map((event) => event.message).join("\n"); }
   private async finish(taskId: string, startedAt: string, summary: string, status: AgentExecutionResult["status"]): Promise<void> { const execution = this.executions.get(taskId); if (!execution || execution.result) return; if (execution.timeout) clearTimeout(execution.timeout); const git = await this.gitState(execution.workingDirectory); const completedAt = at(); execution.result = { taskId, status, summary, files: git.files, branch: git.branch, startedAt, completedAt }; execution.events.push({ type: status === "COMPLETED" ? "COMPLETED" : status === "CANCELLED" ? "CANCELLED" : "FAILED", message: summary, at: completedAt }); }

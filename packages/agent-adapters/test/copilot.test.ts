@@ -19,6 +19,12 @@ describe("CopilotCliAdapter", () => {
   it("accepts a conversational reply without tasks", () => {
     expect(parseCopilotPlan('{"summary":"Qual público você quer atender?","tasks":[]}')).toEqual({ summary: "Qual público você quer atender?", tasks: [] });
   });
+  it("bounds model output before it reaches the Hub or the chat", () => {
+    const plan = parseCopilotPlan(JSON.stringify({ summary: "x".repeat(2_000), tasks: [{ title: "y".repeat(500), description: "z".repeat(9_000), dependencies: [] }] }));
+    expect(plan.summary).toHaveLength(1_200);
+    expect(plan.tasks[0]?.title).toHaveLength(300);
+    expect(plan.tasks[0]?.description).toHaveLength(8_000);
+  });
   it("maps the Office permission profile to non-interactive Copilot flags", () => {
     expect(copilotPermissionArgs("READ_ONLY")).toContain("--deny-tool=shell");
     expect(copilotPermissionArgs("PROJECT_NETWORK")).toContain("--allow-all-urls");

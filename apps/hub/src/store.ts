@@ -33,10 +33,17 @@ export class LocalHubStore {
     found.events ??= [];
     const { events: _events, ...snapshot } = found; return structuredClone(snapshot);
   }
-  async join(code: string, name: string, agent: string, model: string | null = null, role: Participant["role"] = "GENERAL", capabilities: string[] = [], permissionProfile: PermissionProfile = "PROJECT"): Promise<Participant | undefined> {
+  async join(code: string, name: string, agent: string, model: string | null = null, role: Participant["role"] = "GENERAL", capabilities: string[] = [], permissionProfile: PermissionProfile = "PROJECT", participantId?: string): Promise<Participant | undefined> {
     const found = this.data.rooms[code]; if (!found) return undefined;
     found.tasks ??= [];
     found.events ??= [];
+    const reconnecting = (participantId ? found.participants.find((participant) => participant.id === participantId && participant.agent !== "human") : undefined) ?? found.participants.find((participant) => participant.agent !== "human" && participant.state === "DISCONNECTED" && participant.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (reconnecting) {
+      reconnecting.name = name; reconnecting.agent = agent; reconnecting.model = model; reconnecting.role = role; reconnecting.capabilities = capabilities; reconnecting.permissionProfile = permissionProfile; reconnecting.paused = false; reconnecting.state = "AVAILABLE"; reconnecting.lastSeenAt = now();
+      await this.append(found, "PARTICIPANT_CONFIGURED", reconnecting.id, { participant: reconnecting, reconnect: true });
+      await this.append(found, "PRESENCE", reconnecting.id, { state: reconnecting.state, reconnect: true });
+      await this.save(); return structuredClone(reconnecting);
+    }
     if (found.participants.length >= 6) throw new Error("Room capacity reached");
     const participant: Participant = { id: randomUUID(), roomId: found.room.id, name, agent, model, state: "AVAILABLE", role, capabilities, permissionProfile, paused: false, usage: null, joinedAt: now(), lastSeenAt: now() };
     found.participants.push(participant); await this.append(found, "PARTICIPANT_JOINED", participant.id, { participant }); await this.save(); return structuredClone(participant);
@@ -167,11 +174,14 @@ export class LocalHubStore {
   async dispatchTasks(code: string, ownerId: string): Promise<Task[] | undefined> {
     const found = this.data.rooms[code]; if (!found || found.room.ownerId !== ownerId) return undefined; found.tasks ??= [];
     const assigned: Task[] = []; const activeStatuses = new Set<Task["status"]>(["CLAIMED", "RUNNING", "REVIEW", "WAITING_APPROVAL"]);
+    const workers = found.participants.filter((participant) => participant.agent !== "human" && participant.role !== "ORCHESTRATOR");
+    const availableCapabilities = new Set(workers.flatMap((participant) => participant.capabilities ?? []));
     const load = (participantId: string) => found.tasks.filter((task) => task.assignedParticipantId === participantId && activeStatuses.has(task.status)).length;
     for (const task of found.tasks.filter((entry) => entry.status === "READY").sort((a, b) => b.priority - a.priority)) {
-      const candidates = found.participants.filter((participant) => participant.agent !== "human" && !participant.paused && participant.state === "AVAILABLE" && task.requiredCapabilities.every((capability) => (participant.capabilities ?? []).includes(capability))).sort((a, b) => load(a.id) - load(b.id) || a.id.localeCompare(b.id));
+      const enforceableCapabilities = task.requiredCapabilities.filter((capability) => availableCapabilities.has(capability));
+      const candidates = workers.filter((participant) => !participant.paused && participant.state === "AVAILABLE" && enforceableCapabilities.every((capability) => (participant.capabilities ?? []).includes(capability))).sort((a, b) => load(a.id) - load(b.id) || a.id.localeCompare(b.id));
       const target = candidates[0]; if (!target) continue;
-      task.status = "CLAIMED"; task.assignedParticipantId = target.id; task.executionId = randomUUID(); task.attempts += 1; task.updatedAt = now(); assigned.push(task); await this.append(found, "TASK_UPDATED", target.id, { task, dispatch: true });
+      task.status = "CLAIMED"; task.assignedParticipantId = target.id; task.executionId = randomUUID(); task.attempts += 1; task.updatedAt = now(); assigned.push(task); await this.append(found, "TASK_UPDATED", target.id, { task, dispatch: true, ignoredCapabilities: task.requiredCapabilities.filter((capability) => !availableCapabilities.has(capability)) });
     }
     if (assigned.length) await this.save(); return structuredClone(assigned);
   }
@@ -183,7 +193,8 @@ export class LocalHubStore {
     const cutoff = Date.now() - 60_000; let changed = false;
     room.projectMemory ??= "";
     for (const participant of room.participants) { participant.model ??= null; participant.role ??= "GENERAL"; participant.capabilities ??= []; participant.permissionProfile ??= participant.role === "ORCHESTRATOR" ? "READ_ONLY" : "PROJECT"; participant.paused ??= false; participant.usage ??= null; if (!participant.paused && participant.state !== "DISCONNECTED" && Date.parse(participant.lastSeenAt) < cutoff) { participant.state = "DISCONNECTED"; await this.append(room, "PRESENCE", participant.id, { state: "DISCONNECTED" }); changed = true; } }
-    for (const task of room.tasks) if (task.assignedParticipantId && ["CLAIMED", "RUNNING"].includes(task.status) && room.participants.some((participant) => participant.id === task.assignedParticipantId && participant.state === "DISCONNECTED")) { task.status = task.attempts >= task.maxAttempts ? "BLOCKED" : "READY"; task.assignedParticipantId = null; task.executionId = null; task.updatedAt = now(); await this.append(room, "RUNNER_RECOVERED", null, { taskId: task.id, status: task.status, reason: "ASSIGNEE_DISCONNECTED" }); changed = true; }
+    // A heartbeat perdido não prova que o processo da IA morreu. A tarefa fica
+    // com a mesma execução e é recuperada explicitamente quando o runner reinicia.
     if (changed) await this.save();
   }
   private async save(): Promise<void> {

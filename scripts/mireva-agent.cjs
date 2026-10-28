@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require("node:child_process");
 
 const DEFAULT_HUB = "https://mireva-hub.renatojosesfc.workers.dev";
 const PNPM_VERSION = "11.25.0";
-const AGENT_CONFIG_VERSION = 7;
+const AGENT_CONFIG_VERSION = 8;
 const configFile = () => join(process.env.MIREVA_HOME || join(homedir(), ".mireva"), "agent.json");
 const executable = (name) => process.platform === "win32" ? `${name}.cmd` : name;
 function agentConfig() {
@@ -18,9 +18,9 @@ function agentConfig() {
   mkdirSync(dirname(file), { recursive: true });
   // A new bridge version deliberately moves to a fresh local port. Older
   // detached agents can survive a terminal/PC restart; rotating the endpoint
-  // endpoint lets an updated launcher start cleanly instead of talking to a
+  // lets an updated launcher start cleanly instead of talking to a
   // stale process that still has the old bridge code in memory.
-  const config = { version: AGENT_CONFIG_VERSION, port: 49327, token: randomBytes(24).toString("hex"), legacy: previous?.token && previous?.port ? { port: previous.port, token: previous.token } : undefined };
+  const config = { version: AGENT_CONFIG_VERSION, port: 49328, token: randomBytes(24).toString("hex"), legacy: previous?.token && previous?.port ? { port: previous.port, token: previous.token } : undefined };
   writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
   return config;
 }
@@ -43,7 +43,8 @@ function valid(input) {
   const requestedModel = String(input.model ?? "").trim();
   const model = requestedModel || (input.agent === "codex" ? codexConfiguredModel() : null);
   if (model && (model.length > 120 || /[\r\n]/.test(model))) throw new Error("Modelo inválido");
-  return { roomCode: input.roomCode.toUpperCase(), hub: String(input.hub || DEFAULT_HUB).replace(/\/$/, ""), name: input.name.trim(), agent: input.agent, model, role: input.role, capabilities: Array.isArray(input.capabilities) ? input.capabilities.map(String).map((value) => value.trim().toUpperCase()).filter(Boolean).slice(0, 12) : [], permissionProfile, projectDirectory };
+  const participantId = typeof input.participantId === "string" && /^[0-9a-f-]{36}$/i.test(input.participantId) ? input.participantId : undefined;
+  return { roomCode: input.roomCode.toUpperCase(), hub: String(input.hub || DEFAULT_HUB).replace(/\/$/, ""), participantId, name: input.name.trim(), agent: input.agent, model, role: input.role, capabilities: Array.isArray(input.capabilities) ? input.capabilities.map(String).map((value) => value.trim().toUpperCase()).filter(Boolean).slice(0, 12) : [], permissionProfile, projectDirectory };
 }
 // The runtime uses Corepack/npx to install dependencies, which does not place a
 // `pnpm` executable in its node_modules/.bin directory. Invoke the pinned
@@ -62,11 +63,11 @@ function terminateProcessTree(child) {
   try { process.kill(-child.pid, "SIGTERM"); }
   catch { try { child.kill(); } catch {} }
 }
-function runJoin(runtime, input, state) { return new Promise((resolve, reject) => { const modelArgs = input.model ? ["--model", input.model] : []; const child = command(runtime, ["join", input.roomCode, "--hub", input.hub, "--name", input.name, "--agent", input.agent, ...modelArgs, "--role", input.role, "--capabilities", input.capabilities.join(","), "--permissions", input.permissionProfile, "--state", state], { cwd: input.projectDirectory, stdio: "pipe" }); let error = ""; child.stderr.on("data", (chunk) => { error += chunk; }); child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(error.trim() || "Não foi possível entrar na sala"))); }); }
-function canReuseState(state, input) {
-  try { const saved = JSON.parse(readFileSync(state, "utf8")); return saved.roomCode === input.roomCode && String(saved.hubUrl ?? "").replace(/\/$/, "") === input.hub && saved.agent === input.agent && (saved.model ?? null) === (input.model ?? null) && Boolean(saved.participantId); }
-  catch { return false; }
+function savedParticipantId(state, input) {
+  try { const saved = JSON.parse(readFileSync(state, "utf8")); return saved.roomCode === input.roomCode && String(saved.hubUrl ?? "").replace(/\/$/, "") === input.hub && saved.participantId ? String(saved.participantId) : undefined; }
+  catch { return undefined; }
 }
+function runJoin(runtime, input, state) { return new Promise((resolve, reject) => { const modelArgs = input.model ? ["--model", input.model] : []; const participantId = input.participantId || savedParticipantId(state, input); const reconnectArgs = participantId ? ["--participant-id", participantId] : []; const child = command(runtime, ["join", input.roomCode, "--hub", input.hub, "--name", input.name, "--agent", input.agent, ...modelArgs, ...reconnectArgs, "--role", input.role, "--capabilities", input.capabilities.join(","), "--permissions", input.permissionProfile, "--state", state], { cwd: input.projectDirectory, stdio: "pipe" }); let error = ""; child.stderr.on("data", (chunk) => { error += chunk; }); child.on("error", reject); child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(error.trim() || "Não foi possível entrar na sala"))); }); }
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 function logTail(filename) {
   try { return readFileSync(filename, "utf8").trim().split("\n").slice(-8).join("\n"); }
@@ -116,7 +117,9 @@ function startAgentServer({ runtimeDirectory = process.env.MIREVA_RUNTIME_DIR, p
   const persistSessions = () => { mkdirSync(dirname(sessionsFile), { recursive: true }); writeFileSync(sessionsFile, `${JSON.stringify([...sessions.values()].filter((session) => !session.stopped).map(({ child, timer, ...session }) => session), null, 2)}\n`); };
   const launch = async (input, saved = {}) => {
     const sessionId = saved.id || randomUUID(); const state = saved.state || join(input.projectDirectory, ".mireva", `runner-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "agent"}.json`); mkdirSync(dirname(state), { recursive: true });
-    if (!canReuseState(state, input)) await runJoin(runtimeDirectory, input, state);
+    // A reconexão atualiza a estação existente no Hub e preserva o mesmo ID,
+    // inclusive quando modelo, função ou permissões mudam.
+    await runJoin(runtimeDirectory, input, state);
     const log = saved.log || join(input.projectDirectory, ".mireva", `agent-${sessionId}.log`); const workerCommand = input.role === "ORCHESTRATOR" ? "orchestrate" : "work"; const logFd = openSync(log, "a"); let child;
     try { child = command(runtimeDirectory, [workerCommand, "--state", state, "--adapter", input.agent, "--project-dir", input.projectDirectory], { cwd: input.projectDirectory, detached: true, stdio: ["ignore", logFd, logFd] }); } finally { closeSync(logFd); }
     child.unref(); const session = { ...saved, id: sessionId, ...input, state, log, startedAt: saved.startedAt || new Date().toISOString(), restartedAt: saved.startedAt ? new Date().toISOString() : undefined, restartCount: Number(saved.restartCount || 0), stopped: false, child }; sessions.set(sessionId, session); persistSessions();

@@ -53,6 +53,13 @@ export class MirevaRunner {
   }
   async snapshot(): Promise<HubSnapshot> { return this.request(`/rooms/${this.config.roomCode}`) as Promise<HubSnapshot>; }
   async createPlan(input: { request: string; summary: string; tasks: OrchestrationPlanRecord["tasks"] }): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans`, { method: "POST", body: { participantId: this.config.participantId, ...input, request: limitText(input.request, 20_000), summary: limitText(input.summary, 20_000) } }) as Promise<OrchestrationPlanRecord>; }
+  async createPlanWhenConnected(input: { request: string; summary: string; tasks: OrchestrationPlanRecord["tasks"] }): Promise<OrchestrationPlanRecord> {
+    let delay = 500;
+    for (;;) {
+      try { return await this.createPlan(input); }
+      catch (error) { if (!(error instanceof HubConnectionError)) throw error; await wait(delay); delay = Math.min(5_000, delay * 2); }
+    }
+  }
   async decidePlan(planId: string, status: "APPROVED" | "REJECTED"): Promise<OrchestrationPlanRecord> { return this.request(`/rooms/${this.config.roomCode}/plans/${planId}/decision`, { method: "POST", body: { ownerId: this.config.participantId, status } }) as Promise<OrchestrationPlanRecord>; }
   async claimTask(taskId: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/claim`, { method: "POST", body: { participantId: this.config.participantId } }) as Promise<Task>; }
   async updateTask(taskId: string, status: Task["status"], result?: string, executionId?: string): Promise<Task> { return this.request(`/rooms/${this.config.roomCode}/tasks/${taskId}/status`, { method: "POST", body: { participantId: this.config.participantId, status, result: result === undefined ? undefined : limitText(result, 20_000), executionId } }) as Promise<Task>; }
@@ -192,13 +199,13 @@ export class DirectMessageWorker {
     let finalState: AgentState = "AVAILABLE";
     try {
       const response = await this.adapter.respondToMessage({ message: String(message.payload.message), workingDirectory: this.workingDirectory, context, permissionProfile: participant?.permissionProfile ?? "PROJECT", model: participant?.model ?? this.runner.config.model });
-      await this.runner.publish("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: response });
+      await this.runner.publishEventually("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: response });
       return message.id;
     } catch (error: unknown) {
-      const failure = classifyRunnerError(error, "DIRECT_MESSAGE"); finalState = failure.state; await this.runner.publish("RUNNER_ERROR", { ...failure });
-      await this.runner.publish("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: `${failure.title}: ${failure.message}`, error: true });
+      const failure = classifyRunnerError(error, "DIRECT_MESSAGE"); finalState = failure.state; await this.runner.publishEventually("RUNNER_ERROR", { ...failure });
+      await this.runner.publishEventually("AGENT_RESPONSE", { requestEventId: message.id, targetParticipantId: this.runner.config.participantId, message: `${failure.title}: ${failure.message}`, error: true });
       return message.id;
-    } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState); }
+    } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState).catch(() => undefined); }
   }
 }
 
@@ -255,7 +262,7 @@ export class MirevaOrchestrator {
       if (!item.title.trim() || !item.dependencies.every((dependency) => Number.isInteger(dependency) && dependency >= 0 && dependency < index)) throw new Error(`Plano inválido na tarefa ${index + 1}`);
     }
     if (!plan.tasks.length) return { summary: plan.summary };
-    return { summary: plan.summary, plan: await this.runner.createPlan({ request: originalRequest, summary: plan.summary, tasks: plan.tasks.map((item) => ({ ...item, priority: item.priority ?? 50, requiredCapabilities: item.requiredCapabilities ?? [], acceptanceCriteria: item.acceptanceCriteria ?? [] })) }) };
+    return { summary: plan.summary, plan: await this.runner.createPlanWhenConnected({ request: originalRequest, summary: plan.summary, tasks: plan.tasks.map((item) => ({ ...item, priority: item.priority ?? 50, requiredCapabilities: item.requiredCapabilities ?? [], acceptanceCriteria: item.acceptanceCriteria ?? [] })) }) };
   }
   async planAndPropose(request: string): Promise<OrchestrationPlanRecord> {
     const response = await this.respond(request);
@@ -273,7 +280,7 @@ export class OrchestratorWorker {
     if (!requestEvent) return {};
     const request = String(requestEvent.payload.message).trim();
     if (/^(oi|olá|ola|eai|e aí|bom dia|boa tarde|boa noite)[!.?\s]*$/i.test(request)) {
-      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: "Olá! Vamos planejar juntos. Me conte o que você quer construir, para quem é o projeto e qual resultado espera alcançar." } });
+      await this.runner.publishEventually("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: "Olá! Vamos planejar juntos. Me conte o que você quer construir, para quem é o projeto e qual resultado espera alcançar." } });
       return { requestId: requestEvent.id };
     }
     const conversation = events.filter((event) => ["ORCHESTRATOR_REQUEST", "ORCHESTRATOR_RESPONSE"].includes(event.kind)).slice(-12).map((event) => event.kind === "ORCHESTRATOR_REQUEST" ? `Responsável: ${String(event.payload.message ?? "")}` : `Orquestrador: ${String((event.payload.orchestrator as { summary?: string } | undefined)?.summary ?? "")}`).join("\n");
@@ -286,12 +293,12 @@ export class OrchestratorWorker {
     let finalState: AgentState = "AVAILABLE";
     try {
       const response = await this.orchestrator.respond(contextualRequest, request);
-      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: response.summary, planId: response.plan?.id, taskCount: response.plan?.tasks.length ?? 0 } });
+      await this.runner.publishEventually("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: response.summary, planId: response.plan?.id, taskCount: response.plan?.tasks.length ?? 0 } });
       return { requestId: requestEvent.id, planId: response.plan?.id };
     } catch (error: unknown) {
-      const failure = classifyRunnerError(error, "ORCHESTRATE"); finalState = failure.state; await this.runner.publish("RUNNER_ERROR", { ...failure });
-      await this.runner.publish("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: `${failure.title}: ${failure.message}`, error: true } });
+      const failure = classifyRunnerError(error, "ORCHESTRATE"); finalState = failure.state; await this.runner.publishEventually("RUNNER_ERROR", { ...failure });
+      await this.runner.publishEventually("ORCHESTRATOR_RESPONSE", { requestEventId: requestEvent.id, orchestrator: { summary: `${failure.title}: ${failure.message}`, error: true } });
       return { requestId: requestEvent.id, error: failure.message };
-    } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState); }
+    } finally { clearInterval(heartbeat); await this.runner.setPresence(finalState).catch(() => undefined); }
   }
 }

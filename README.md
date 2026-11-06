@@ -1,4 +1,21 @@
-# Mireva Workspace
+# Mireva Workspace — Orquestração de agentes de IA
+
+**Ambiente de desenvolvimento colaborativo para coordenar múltiplos agentes de IA, distribuindo tarefas entre runners e mantendo supervisão humana sobre decisões e entregas.**
+
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-149ECA?logo=react&logoColor=white)](https://react.dev/)
+[![Node.js](https://img.shields.io/badge/Node.js-5FA04E?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/)
+
+## O problema que o projeto aborda
+
+O uso de vários assistentes de programação ao mesmo tempo costuma exigir acompanhamento manual, divisão de tarefas e revisão de mudanças. O Mireva Workspace explora uma camada de orquestração com salas, agentes conectados, tarefas com dependências, permissões e supervisão das entregas.
+
+**Destaques técnicos:** monorepo TypeScript, Office em React, Hub com Cloudflare Durable Objects, execução por runners locais e fluxo de revisão humana antes da conclusão das tarefas.
+
+**[Código-fonte](https://github.com/RenatoJose7/Mireva-Workspace)** · **[Perfil do desenvolvedor](https://github.com/RenatoJose7)**
+
+## Documentação e uso
 
 ## Instalação com um comando
 
